@@ -9,13 +9,13 @@ from impulse_db import ImpulseDB
 class Ballchasing:
 
     def __init__(self, bc_api_key:str=None, aws_region:str=None, s3_bucket_name:str=None):
-        self.bc_api_key = bc_api_key if bc_api_key else self.get_bc_api_key()
+        self.bc_api_key = bc_api_key if bc_api_key else self._get_bc_api_key()
         self.bc_base_url = "https://ballchasing.com/api"
         self.bc_headers = {"Authorization": self.bc_api_key}
         self.bc_session = requests.Session()
         self.bc_session.headers.update(self.bc_headers)
 
-    def get_bc_api_key(self) -> str:
+    def _get_bc_api_key(self) -> str:
         """Retrieve Ballchasing API key from environment variables."""
         load_dotenv()
         bc_api_key = os.environ.get("BALLCHASING_API_KEY")
