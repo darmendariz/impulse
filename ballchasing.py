@@ -1,10 +1,12 @@
 from dotenv import load_dotenv
 import os
+import io
 import requests
 import time
 from typing import List, Dict, Tuple
 from pathlib import Path
 from impulse_db import ImpulseDB
+from s3_manager import S3Manager
 
 class Ballchasing:
 
@@ -352,4 +354,208 @@ class Ballchasing:
             'failed': failed,
             'output_dir': str(output_base.absolute()),
             'files': downloaded_files
+        }
+
+    def download_group_to_s3(self, group_id: str, s3_prefix: str = "replays", 
+                         use_database: bool = True) -> Dict:
+        """
+        Download all replays from a Ballchasing group directly to S3.
+        Streams files through memory, bypassing local disk storage.
+        
+        Args:
+            group_id: Ballchasing group ID to download
+            s3_prefix: S3 key prefix (default: "replays")
+            use_database: Whether to use database for deduplication (default: True)
+            
+        Returns:
+            Dict with download statistics
+        """
+        # Initialize managers
+        db = ImpulseDB() if use_database else None
+        s3 = S3Manager()
+        
+        # Ensure S3 bucket exists
+        s3.create_bucket_if_needed()
+        
+        print("="*60)
+        print("IMPULSE: Ballchasing → S3 Direct Upload")
+        print(f"Database: {'ENABLED' if use_database else 'DISABLED'}")
+        print(f"S3 Bucket: {s3.s3_bucket_name}")
+        print("="*60)
+        print()
+        
+        # Build group tree
+        print("Building group tree...")
+        print()
+        tree = self.build_group_tree(group_id)
+        
+        # Flatten to replay list
+        print()
+        print("Flattening tree structure...")
+        replay_list = self.flatten_tree_to_replay_list(tree)
+        print(f"✓ Found {len(replay_list)} total replays")
+        
+        # Register group in database
+        if db:
+            db.register_group_download(tree['id'], tree['name'], len(replay_list))
+        
+        # Add replays to database and check what needs downloading
+        if db:
+            print("\nChecking database for existing replays...")
+            new_replays = 0
+            existing_replays = 0
+            
+            for replay, _ in replay_list:
+                is_new = db.add_replay(replay['id'], replay)
+                if is_new:
+                    new_replays += 1
+                else:
+                    existing_replays += 1
+            
+            print(f"  New replays: {new_replays}")
+            print(f"  Already in database: {existing_replays}")
+        
+        # Download and upload to S3
+        print()
+        print("="*60)
+        print(f"STREAMING REPLAYS TO S3")
+        print("="*60)
+        print()
+        
+        successful = 0
+        failed = 0
+        skipped = 0
+        total_bytes = 0
+        
+        for i, (replay, group_path) in enumerate(replay_list, 1):
+            replay_id = replay['id']
+            
+            # Build S3 key from group hierarchy
+            root_name = tree.get('name', group_id)
+            root_sanitized = self.sanitize_path_component(root_name)
+            
+            if group_path and len(group_path) > 0:
+                relative_components = group_path[1:]  # Drop root
+            else:
+                relative_components = []
+            
+            sanitized_path = [self.sanitize_path_component(p) for p in relative_components]
+            path_parts = [s3_prefix, root_sanitized] + sanitized_path
+            s3_key = '/'.join(path_parts) + f'/{replay_id}.replay'
+            
+            # Print progress
+            print(f"[{i}/{len(replay_list)}] {replay_id}")
+            print(f"  S3 Key: {s3_key}")
+            
+            # Check database first (resume capability)
+            if db and db.is_replay_downloaded(replay_id):
+                print(f"  ⊘ Already in S3 (database check), skipping")
+                skipped += 1
+                print()
+                continue
+            
+            # Check S3 directly (double-check, in case database is out of sync)
+            if s3.object_exists(s3_key):
+                print(f"  ⊘ Already in S3 (direct check), updating database")
+                if db:
+                    size = s3.get_object_size(s3_key)
+                    db.mark_downloaded(replay_id, s3_key, size)
+                skipped += 1
+                print()
+                continue
+            
+            try:
+                # Download from Ballchasing to memory
+                print(f"  Downloading from Ballchasing...")
+                url = f"{self.bc_base_url}/replays/{replay_id}/file"
+                response = self.bc_session.get(url)
+                response.raise_for_status()
+                
+                # Create in-memory file object
+                file_buffer = io.BytesIO(response.content)
+                file_size = len(response.content)
+                file_size_mb = file_size / (1024 * 1024)
+                
+                print(f"  Downloaded: {file_size_mb:.2f} MB")
+                
+                # Prepare metadata
+                metadata = {
+                    'replay_id': replay_id,
+                    'source': 'ballchasing',
+                    'group_id': group_id,
+                    'blue_team': replay.get('blue', {}).get('name', 'Unknown'),
+                    'orange_team': replay.get('orange', {}).get('name', 'Unknown'),
+                    'date': replay.get('date', 'Unknown')
+                }
+                
+                # Upload to S3 (directly from memory)
+                print(f"  Uploading to S3...")
+                upload_result = s3.upload_fileobj(file_buffer, s3_key, metadata)
+                
+                if not upload_result['success']:
+                    raise Exception(upload_result.get('error', 'Upload failed'))
+                
+                print(f"  ✓ Uploaded to S3")
+                
+                # Update database
+                if db:
+                    db.mark_downloaded(replay_id, s3_key, file_size)
+                
+                successful += 1
+                total_bytes += file_size
+                
+                # Rate limiting (be nice to Ballchasing)
+                time.sleep(1)
+                print()
+                
+            except Exception as e:
+                print(f"  ✗ Failed: {e}")
+                if db:
+                    db.mark_replay_failed(replay_id, str(e))
+                failed += 1
+                print()
+                continue
+        
+        # Backup database to S3
+        if db:
+            print("\nBacking up database to S3...")
+            s3.backup_database(db.db_path)
+        
+        # Print summary
+        print()
+        print("="*60)
+        print("UPLOAD SUMMARY")
+        print("="*60)
+        print(f"Total replays: {len(replay_list)}")
+        print(f"Successfully uploaded: {successful}")
+        print(f"Skipped (already in S3): {skipped}")
+        print(f"Failed: {failed}")
+        print(f"Total uploaded: {total_bytes / (1024**2):.2f} MB ({total_bytes / (1024**3):.2f} GB)")
+        print(f"S3 Bucket: s3://{s3.s3_bucket_name}/{s3_prefix}/{root_sanitized}/")
+        
+        # Get S3 storage stats
+        print()
+        print("S3 STORAGE STATISTICS")
+        print("-"*60)
+        stats = s3.get_storage_stats(f"{s3_prefix}/{root_sanitized}/")
+        print(f"Total objects in S3: {stats.get('total_objects', 0)}")
+        print(f"Total storage: {stats.get('total_gb', 0):.2f} GB")
+        
+        # Database statistics
+        if db:
+            print()
+            print("DATABASE STATISTICS")
+            print("-"*60)
+            db_stats = db.get_stats()
+            for key, value in db_stats.items():
+                print(f"{key}: {value}")
+        
+        return {
+            'total': len(replay_list),
+            'successful': successful,
+            'skipped': skipped,
+            'failed': failed,
+            'total_bytes': total_bytes,
+            's3_bucket': s3.s3_bucket_name,
+            's3_prefix': f"{s3_prefix}/{root_sanitized}/"
         }
