@@ -56,10 +56,13 @@ class ImpulseDB:
                     date TEXT,
                     blue_team TEXT,
                     orange_team TEXT,
-                    file_path TEXT,
+                    s3_key TEXT,
                     file_size_bytes INTEGER,
                     downloaded_at TEXT,
-                    is_downloaded BOOLEAN DEFAULT 0
+                    is_downloaded BOOLEAN DEFAULT 0,
+                    download_status TEXT DEFAULT 'pending',
+                    error_message TEXT,
+                    CHECK (download_status IN ('pending', 'downloaded', 'failed'))
                 )
             """)
             
@@ -67,6 +70,11 @@ class ImpulseDB:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_replays_downloaded 
                 ON replays(is_downloaded)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_replays_status 
+                ON replays(download_status)
             """)
     
     def add_replay(self, replay_id: str, ballchasing_metadata: Dict) -> bool:
@@ -103,7 +111,13 @@ class ImpulseDB:
             return True  # New replay added
         
     def register_group_download(self, group_id: str, name: str, replay_count: int):
-        """Track that we've synced this group"""
+        """Track that we've downloaded this group from Ballchasing.
+        
+        Args:
+            group_id: Ballchasing group ID
+            name: Group name
+            replay_count: Number of replays in the group
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -123,19 +137,65 @@ class ImpulseDB:
                 WHERE replay_id = ? AND is_downloaded = 1
             """, (replay_id,))
             return cursor.fetchone() is not None
-    
-    def mark_downloaded(self, replay_id: str, file_path: str, file_size: int):
-        """Mark a replay as downloaded with its file info"""
+
+    def mark_downloaded(self, replay_id: str, s3_key: str, file_size: int):
+        """
+        Mark a replay as downloaded with its S3 location.
+        
+        Args:
+            replay_id: Replay ID
+            s3_key: S3 key where replay is stored
+            file_size: File size in bytes
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE replays
-                SET file_path = ?,
+                SET s3_key = ?,
                     file_size_bytes = ?,
                     downloaded_at = ?,
-                    is_downloaded = 1
+                    is_downloaded = 1,
+                    download_status = 'downloaded'
                 WHERE replay_id = ?
-            """, (file_path, file_size, datetime.now(timezone.utc).isoformat(), replay_id))
+            """, (s3_key, file_size, datetime.now(timezone.utc).isoformat(), replay_id))
+
+    def mark_replay_failed(self, replay_id: str, error_message: str = None):
+        """
+        Mark a replay download as failed.
+        
+        Args:
+            replay_id: Replay ID that failed
+            error_message: Optional error description
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE replays
+                SET download_status = 'failed',
+                    error_message = ?
+                WHERE replay_id = ?
+            """, (error_message, replay_id))
+
+    def get_failed_replays(self, group_id: str = None) -> list:
+        """
+        Get all replays that failed to download. Useful for retrying failed downloads.
+        
+        Args:
+            group_id: Optional group ID to filter by
+            
+        Returns:
+            List of failed replay dicts
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT replay_id, title, error_message 
+                FROM replays 
+                WHERE download_status = 'failed'
+            """)
+            
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
     
     def get_stats(self) -> Dict:
         """Get simple statistics"""
@@ -150,10 +210,15 @@ class ImpulseDB:
             
             cursor.execute("SELECT SUM(file_size_bytes) as bytes FROM replays WHERE is_downloaded = 1")
             total_bytes = cursor.fetchone()['bytes'] or 0
+
+            cursor.execute("SELECT COUNT(*) as failed FROM replays WHERE download_status = 'failed'")
+            failed = cursor.fetchone()['failed']
             
             return {
                 'total_replays': total,
                 'downloaded': downloaded,
-                'pending': total - downloaded,
-                'storage_mb': round(total_bytes / (1024**2), 2)
+                'failed': failed,
+                'pending': total - downloaded - failed,
+                'storage_mb': round(total_bytes / (1024**2), 2),
+                'storage_gb': round(total_bytes / (1024**3), 2)
             }
