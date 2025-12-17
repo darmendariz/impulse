@@ -75,7 +75,8 @@ def estimate_costs(num_replays: int, size_gb: float) -> dict:
     """
     # TODO: Refine estimates based on actual usage patterns. Numbers supplied by Claude Sonnet 4.5 on 12-16-2025.
     # EC2 costs (t3.micro)
-    hours_needed = num_replays / 3600  # ~1 second per replay
+    # Rate limit: 200 replays/hour (Ballchasing free tier)
+    hours_needed = num_replays / 200  # Limited by API, not compute
     ec2_hourly_rate = 0.0104  # us-east-1 on-demand
     ec2_spot_rate = 0.0031    # ~70% discount with spot
     
@@ -296,6 +297,7 @@ Examples:
     elif args.season:
         if args.estimate_only:
             print_season_info(args.season)
+            print_cost_estimates(args.season)
         else:
             download_season(args.season, dry_run=args.dry_run)
     else:

@@ -7,6 +7,7 @@ from typing import List, Dict, Tuple
 from pathlib import Path
 from impulse_db import ImpulseDB
 from s3_manager import S3Manager
+from rate_limiter import RateLimiter
 
 class Ballchasing:
 
@@ -16,6 +17,7 @@ class Ballchasing:
         self.bc_headers = {"Authorization": self.bc_api_key}
         self.bc_session = requests.Session()
         self.bc_session.headers.update(self.bc_headers)
+        self.rate_limiter = RateLimiter()
 
     def _get_bc_api_key(self) -> str:
         """Retrieve Ballchasing API key from environment variables."""
@@ -359,7 +361,7 @@ class Ballchasing:
     def download_group_to_s3(self, group_id: str, s3_prefix: str = "replays", 
                          use_database: bool = True) -> Dict:
         """
-        Download all replays from a Ballchasing group directly to S3.
+        Download all replays from a Ballchasing group directly to S3. Uses RateLimiter to avoid hitting API download limits.
         Streams files through memory, bypassing local disk storage.
         
         Args:
@@ -465,6 +467,9 @@ class Ballchasing:
                 continue
             
             try:
+                # Check rate limiter before making request
+                self.rate_limiter.wait_if_needed()
+
                 # Download from Ballchasing to memory
                 print(f"  Downloading from Ballchasing...")
                 url = f"{self.bc_base_url}/replays/{replay_id}/file"
@@ -503,9 +508,15 @@ class Ballchasing:
                 
                 successful += 1
                 total_bytes += file_size
+
+                # Print rate limit status every 50 replays
+                if i % 50 == 0:
+                    status = self.rate_limiter.get_status()
+                    print(f"\n  📊 Rate Limit Status:")
+                    print(f"     Requests this hour: {status['requests_this_hour']}/{self.rate_limiter.requests_per_hour}")
+                    print(f"     Window resets in: {status['window_resets_in_minutes']:.1f} minutes")
+                    print()
                 
-                # Rate limiting (be nice to Ballchasing)
-                time.sleep(1)
                 print()
                 
             except Exception as e:
