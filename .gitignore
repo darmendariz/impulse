@@ -15,7 +15,7 @@ wheels/
 *.ppk
 
 # Project-specific ignores
-/replays/
+*.replay
 *.json
 *.npy
 

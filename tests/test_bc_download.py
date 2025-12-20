@@ -1,6 +1,6 @@
 """Test script for ballchasing.py functionality, namely downloading replays from a specified group."""
 
-import ballchasing
+import impulse.collection.ballchasing as ballchasing
 
 def run_simple_test(test_group_id:str):
     """
