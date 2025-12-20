@@ -5,9 +5,9 @@ import requests
 import time
 from typing import List, Dict, Tuple
 from pathlib import Path
-from impulse_db import ImpulseDB
-from s3_manager import S3Manager
-from rate_limiter import RateLimiter
+from impulse.collection.database import ImpulseDB
+from impulse.collection.s3_manager import S3Manager
+from impulse.collection.rate_limiter import RateLimiter
 
 class Ballchasing:
 

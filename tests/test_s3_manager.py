@@ -1,4 +1,4 @@
-from s3_manager import S3Manager
+from impulse.collection.s3_manager import S3Manager
 
 if __name__ == "__main__":
     print("Testing S3Manager...\n")

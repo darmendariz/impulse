@@ -8,9 +8,9 @@ Usage:
 
 import argparse
 from datetime import timezone
-from ballchasing import Ballchasing
-from impulse_db import ImpulseDB
-from s3_manager import S3Manager
+from impulse.collection.ballchasing import Ballchasing
+from impulse.collection import ImpulseDB
+from impulse.collection.s3_manager import S3Manager
 from datetime import datetime
 
 

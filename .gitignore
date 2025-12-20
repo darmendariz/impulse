@@ -15,9 +15,7 @@ wheels/
 *.ppk
 
 # Project-specific ignores
-/replays/
-
-# db 
+*.replay
 *.db
 
 # Other

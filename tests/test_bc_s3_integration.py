@@ -5,9 +5,9 @@ Run this to test the complete flow of replay files from:
 Ballchasing → Memory → S3 → Database
 """
 
-from ballchasing import Ballchasing
-from s3_manager import S3Manager
-from impulse_db import ImpulseDB
+from impulse.collection.ballchasing import Ballchasing
+from impulse.collection.s3_manager import S3Manager
+from impulse.collection.database import ImpulseDB
 
 
 def test_s3_setup():
