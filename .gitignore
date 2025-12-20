@@ -16,6 +16,8 @@ wheels/
 
 # Project-specific ignores
 /replays/
+*.json
+*.npy
 
 # db 
 *.db
