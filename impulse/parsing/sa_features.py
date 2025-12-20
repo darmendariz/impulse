@@ -12,6 +12,9 @@ valid_feature_adders has the following structure:
         feature_adder_name: [list of columns returned in the ndarray]
         }
 }
+
+valid_feature_adders['global'].keys() returns a list of valid global feature adders.
+valid_feature_adders['player'].keys() returns a list of valid player feature adders.
 """
 
 valid_feature_adders = {
