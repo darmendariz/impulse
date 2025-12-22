@@ -13,8 +13,8 @@ valid_feature_adders has the following structure:
         }
 }
 
-valid_feature_adders['global'].keys() returns a list of valid global feature adders.
-valid_feature_adders['player'].keys() returns a list of valid player feature adders.
+ - valid_feature_adders['global'].keys() returns a list of valid global feature adders.
+ - valid_feature_adders['player'].keys() returns a list of valid player feature adders.
 """
 
 valid_feature_adders = {
@@ -57,6 +57,9 @@ valid_feature_adders = {
         "FrameTime": [
             'frame time'
             ],
+        "SecondsRemaining": [
+            'seconds remaining'
+            ],
         "InterpolatedBallRigidBodyNoVelocities": [
             'Ball - position x', 
             'Ball - position y', 
@@ -65,9 +68,6 @@ valid_feature_adders = {
             'Ball - rotation y', 
             'Ball - rotation z', 
             'Ball - rotation w'
-            ],
-        "SecondsRemaining": [
-            'seconds remaining'
             ],
         "VelocityAddedBallRigidBodyNoVelocities": [
             'Ball - position x', 
