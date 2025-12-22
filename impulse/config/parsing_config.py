@@ -1,23 +1,47 @@
 """
-Valid feature adders for subtr_actor.get_ndarray_with_info_from_replay_filepath() method. Subtr_actor will parse these features from the replay file and add them as columns to the returned ndarray.
-
-Taken from https://docs.rs/subtr-actor/latest/subtr_actor/collector/ndarray/index.html. 
-
-valid_feature_adders has the following structure:
-{
-    "global": {
-        feature_adder_name: [list of columns returned in the ndarray]
-        },
-    "player": {
-        feature_adder_name: [list of columns returned in the ndarray]
-        }
-}
-
- - valid_feature_adders['global'].keys() returns a list of valid global feature adders.
- - valid_feature_adders['player'].keys() returns a list of valid player feature adders.
+Configuration file for parsing using subtr_actor. Consists of valid feature adders and feature presets.
 """
 
-valid_feature_adders = {
+FPS = 10.0
+
+# Preset configurations for subtr_actor.get_ndarray_with_info_from_replay_filepath() method. Subtr_actor will parse the feature adders specified in the preset and add them as columns to the returned ndarray. 
+# See VALID_FEATURE_ADDERS for the corresponding columns returned by each feature adder.
+FEATURE_PRESETS = {
+    'standard': {
+        'global' : [
+            'CurrentTime', 
+            'FrameTime', 
+            'SecondsRemaining', 
+            'BallRigidBody', 
+            'BallRigidBodyQuaternions'
+        ],
+        'player' : [
+            'PlayerRigidBody',
+            'PlayerRigidBodyQuaternions',
+            'PlayerBoost',
+            'PlayerJump',
+            'PlayerDemolishedBy'
+        ]
+    },
+    'minimal' : {},
+    'all' : {}
+}
+
+
+# Valid feature adders for subtr_actor.get_ndarray_with_info_from_replay_filepath() method. Subtr_actor will parse these features from the replay file and add them as columns to the returned ndarray.
+# Taken from https://docs.rs/subtr-actor/latest/subtr_actor/collector/ndarray/index.html. 
+
+# VALID_FEATURE_ADDERS has the following structure:
+# {
+#     "global": {
+#         feature_adder_name: [list of columns returned in the ndarray]
+#         },
+#     "player": {
+#         feature_adder_name: [list of columns returned in the ndarray]
+#         }
+# }
+
+VALID_FEATURE_ADDERS = {
     "global": {
         "BallRigidBody": [
             'Ball - position x', 
@@ -146,3 +170,4 @@ valid_feature_adders = {
             ],
     }
 }
+
