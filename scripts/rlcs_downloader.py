@@ -61,54 +61,6 @@ RLCS_SEASONS = {
     }
 }
 
-
-def estimate_costs(num_replays: int, size_gb: float) -> dict:
-    """
-    Estimate AWS costs for downloading and storing replays.
-    
-    Args:
-        num_replays: Number of replays to download
-        size_gb: Total size in GB
-    
-    Returns:
-        Dict with cost breakdown
-    """
-    # TODO: Refine estimates based on actual usage patterns. Numbers supplied by Claude Sonnet 4.5 on 12-16-2025.
-    # EC2 costs (t3.micro)
-    # Rate limit: 200 replays/hour (Ballchasing free tier)
-    hours_needed = num_replays / 200  # Limited by API, not compute
-    ec2_hourly_rate = 0.0104  # us-east-1 on-demand
-    ec2_spot_rate = 0.0031    # ~70% discount with spot
-    
-    ec2_cost_ondemand = hours_needed * ec2_hourly_rate
-    ec2_cost_spot = hours_needed * ec2_spot_rate
-    
-    # S3 storage costs (Standard)
-    s3_storage_monthly = size_gb * 0.023  # $0.023/GB/month
-    s3_storage_yearly = s3_storage_monthly * 12
-    
-    # Data transfer (Ballchasing -> EC2 -> S3)
-    # Ingress to EC2: FREE
-    # EC2 -> S3 (same region): FREE
-    data_transfer_cost = 0.0
-    
-    # Total first month
-    total_first_month = ec2_cost_ondemand + s3_storage_monthly
-    total_first_month_spot = ec2_cost_spot + s3_storage_monthly
-    
-    return {
-        'ec2_hours': round(hours_needed, 2),
-        'ec2_cost_ondemand': round(ec2_cost_ondemand, 2),
-        'ec2_cost_spot': round(ec2_cost_spot, 2),
-        's3_storage_monthly': round(s3_storage_monthly, 2),
-        's3_storage_yearly': round(s3_storage_yearly, 2),
-        'data_transfer': data_transfer_cost,
-        'total_first_month_ondemand': round(total_first_month, 2),
-        'total_first_month_spot': round(total_first_month_spot, 2),
-        'ongoing_monthly': round(s3_storage_monthly, 2)
-    }
-
-
 def print_season_info(season_key: str):
     """Print information about a season"""
     season = RLCS_SEASONS[season_key]
@@ -122,32 +74,6 @@ def print_season_info(season_key: str):
     print(f"Estimated Size: {season['estimated_size_gb']:.1f} GB")
     print(f"Active Season: {season['is_active']} (as of {season['last_updated']})")
     print()
-    
-def print_cost_estimates(season_key: str):
-    """Print cost estimates for downloading and storing a season"""
-    season = RLCS_SEASONS[season_key]
-    # Calculate costs
-    costs = estimate_costs(season['estimated_replay_count'], season['estimated_size_gb'])
-    
-    print("COST ESTIMATES")
-    print("-"*60)
-    print(f"EC2 Runtime: {costs['ec2_hours']} hours")
-    print(f"  On-Demand: ${costs['ec2_cost_ondemand']}")
-    print(f"  Spot Instance: ${costs['ec2_cost_spot']} (recommended)")
-    print()
-    print(f"S3 Storage: {season['estimated_size_gb']:.1f} GB")
-    print(f"  Monthly: ${costs['s3_storage_monthly']}")
-    print(f"  Yearly: ${costs['s3_storage_yearly']}")
-    print()
-    print(f"Data Transfer: ${costs['data_transfer']} (FREE!)")
-    print()
-    print("TOTAL COSTS:")
-    print(f"  First month (on-demand): ${costs['total_first_month_ondemand']}")
-    print(f"  First month (spot): ${costs['total_first_month_spot']}")
-    print(f"  Ongoing (monthly): ${costs['ongoing_monthly']}")
-    print("="*60)
-    print()
-
 
 def download_season(season_key: str, dry_run: bool = False):
     """
@@ -297,7 +223,6 @@ Examples:
     elif args.season:
         if args.estimate_only:
             print_season_info(args.season)
-            print_cost_estimates(args.season)
         else:
             download_season(args.season, dry_run=args.dry_run)
     else:
