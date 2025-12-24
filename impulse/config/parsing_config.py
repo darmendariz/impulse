@@ -1,5 +1,6 @@
 """
-Configuration file for parsing using subtr_actor.  
+Configuration file for parsing using subtr_actor. 
+Purpose: handle extraction settings for parsing.  
 """
 
 from typing import Dict, List

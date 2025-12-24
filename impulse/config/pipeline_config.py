@@ -1,3 +1,8 @@
+"""
+Configures various settings for a replay processing pipeline. Includes settings for specifying data quality and schema standards. 
+Purpose: Enforce pipeline quality standards and prepare parsed data for storage. 
+"""
+
 from dataclasses import dataclass, field
 
 @dataclass
@@ -8,25 +13,25 @@ class PipelineConfig:
     """
     
     # Parquet schema configuration
-    max_players: int = 8
+    SCHEMA_MAX_PLAYERS: int = 8  # Number of player columns to allocate in Parquet schema
     
     # Parquet storage configuration
-    parquet_compression: str = 'snappy'
-    s3_parsed_prefix: str = 'replays-parsed'
-    s3_raw_prefix: str = 'replays-raw'
-    
+    PARQUET_COMPRESSION: str = 'snappy'
+    S3_PARSED_PREFIX: str = 'replays-parsed'
+    S3_RAW_PREFIX: str = 'replays-raw'
+
     # Data quality validation
-    min_frames: int = 100
-    max_frames: int = 100000
-    min_players: int = 2
-    max_players_actual: int = 8
-    
+    MIN_FRAMES: int = 100
+    MAX_FRAMES: int = 100000
+    MIN_PLAYERS: int = 2
+    MAX_PLAYERS: int = 8  # Maximum players allowed in a replay for validation
+
     # Feature deduplication strategy for rigid body physics
-    deduplicate_position: bool = True
-    keep_quaternions: bool = True
-    keep_euler_angles: bool = False  
-    keep_velocities: bool = True
+    DEDUPLICATE_POSITION: bool = True
+    KEEP_QUATERNIONS: bool = True
+    KEEP_EULER_ANGLES: bool = False  
+    KEEP_VELOCITIES: bool = True
 
     # Retry logic
-    max_retries: int = 3
-    retry_delay_seconds: int = 60
+    MAX_RETRIES: int = 3
+    RETRY_DELAY_SECONDS: int = 60
