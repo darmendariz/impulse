@@ -11,7 +11,7 @@ class RateLimiter:
     - 1 request per second
     - 200 requests per hour (free tier)
 
-    Patreon patrons get higher limits, but this is not implemented here.
+    Ballchasing patreon patrons get higher limits, but this is not implemented here.
     """
     
     def __init__(self, requests_per_second: float = 1.0, requests_per_hour: int = 200):

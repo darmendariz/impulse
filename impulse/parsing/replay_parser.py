@@ -24,6 +24,8 @@ class ParseResult:
     num_features: int
     num_players: int
     fps: float
+    global_features: Optional[List[str]] = None
+    player_features: Optional[List[str]] = None
     error: Optional[str] = None
     
     @property
@@ -112,6 +114,8 @@ class ReplayParser:
                 num_features=-1,
                 num_players=-1,
                 fps=self.fps,
+                global_features=self.global_features,
+                player_features=self.player_features,
                 error=f"File not found: {replay_path}"
             )
         
@@ -139,6 +143,8 @@ class ReplayParser:
                     num_features=array.shape[1] if array is not None else 0,
                     num_players=num_players,
                     fps=self.fps,
+                    global_features=self.global_features,
+                    player_features=self.player_features,
                     error=validation_error
                 )
             
@@ -150,7 +156,9 @@ class ReplayParser:
                 num_frames=array.shape[0],
                 num_features=array.shape[1],
                 num_players=num_players,
-                fps=self.fps
+                fps=self.fps,
+                global_features=self.global_features,
+                player_features=self.player_features
             )
             
         except Exception as e:
@@ -163,6 +171,8 @@ class ReplayParser:
                 num_features=-1,
                 num_players=-1,
                 fps=self.fps,
+                global_features=self.global_features,
+                player_features=self.player_features,
                 error=f"Parsing failed: {str(e)}"
             )
     
