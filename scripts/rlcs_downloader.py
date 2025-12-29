@@ -15,8 +15,8 @@ from datetime import datetime
 
 
 # RLCS Season Ballchasing Group IDs
+# TODO: Refine this value based on actual data.
 avg_replay_size_mb = 1.8    # Average replay size in MB. Loose estimate updated 12-16-2025.
-                            # TODO: Refine this value based on actual data.
 # TODO: Add previous seasons going back to RLCS S1. 
 RLCS_SEASONS = {
     '21-22': {

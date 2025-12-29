@@ -512,7 +512,7 @@ class Ballchasing:
                 # Print rate limit status every 50 replays
                 if i % 50 == 0:
                     status = self.rate_limiter.get_status()
-                    print(f"\n  📊 Rate Limit Status:")
+                    print(f"\nRate Limit Status:")
                     print(f"     Requests this hour: {status['requests_this_hour']}/{self.rate_limiter.requests_per_hour}")
                     print(f"     Window resets in: {status['window_resets_in_minutes']:.1f} minutes")
                     print()
