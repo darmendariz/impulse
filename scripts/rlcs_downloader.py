@@ -7,11 +7,12 @@ Usage:
 """
 
 import argparse
-from datetime import timezone
-from impulse.collection.ballchasing import Ballchasing
-from impulse.collection import ImpulseDB
-from impulse.collection.s3_manager import S3Manager
-from datetime import datetime
+from datetime import timezone, datetime
+import json
+
+# New simplified collection API
+from impulse.collection import download_group
+from impulse.collection.storage import S3Backend
 
 
 # RLCS Season Ballchasing Group IDs
@@ -108,33 +109,27 @@ def download_season(season_key: str, dry_run: bool = False):
         print("Download cancelled")
         return
     
-    # Initialize services
-    print("\nInitializing services...")
-    bc = Ballchasing()
-    db = ImpulseDB()
-    s3 = S3Manager()
-    
-    # Check S3 bucket exists
-    s3.create_bucket_if_needed()
-    
     # Log start time
     start_time = datetime.now(timezone.utc)
     print(f"\nStarted: {start_time.isoformat()}")
     print()
-    
+
     # Download with custom S3 prefix
-    s3_prefix = f"replays/rlcs/{season_key}"
-    
+    path_prefix = ['replays', 'rlcs', season_key]
+
     try:
-        results = bc.download_group_to_s3(
+        # Use new simplified API - automatically handles all initialization
+        result = download_group(
             group_id=season['group_id'],
-            s3_prefix=s3_prefix
+            storage_type='s3',
+            path_prefix=path_prefix,
+            use_database=True
         )
         
         # Log completion
         end_time = datetime.now(timezone.utc)
         duration = end_time - start_time
-        
+
         print()
         print("="*60)
         print("DOWNLOAD COMPLETE")
@@ -143,14 +138,13 @@ def download_season(season_key: str, dry_run: bool = False):
         print(f"Finished: {end_time.isoformat()}")
         print(f"Duration: {duration}")
         print()
-        print(f"Total replays: {results['total']}")
-        print(f"Successfully uploaded: {results['successful']}")
-        print(f"Skipped: {results['skipped']}")
-        print(f"Failed: {results['failed']}")
-        print(f"Total size: {results['total_bytes'] / (1024**3):.2f} GB")
+        print(f"Total replays: {result.total_replays}")
+        print(f"Successfully uploaded: {result.successful}")
+        print(f"Skipped: {result.skipped}")
+        print(f"Failed: {result.failed}")
+        print(f"Total size: {result.total_bytes / (1024**3):.2f} GB")
         print()
-        print(f"S3 Location: s3://{results['s3_bucket']}/{s3_prefix}/")
-        
+
         # Save completion log
         log_entry = {
             'season': season_key,
@@ -158,18 +152,25 @@ def download_season(season_key: str, dry_run: bool = False):
             'started': start_time.isoformat(),
             'finished': end_time.isoformat(),
             'duration_seconds': duration.total_seconds(),
-            'results': results
+            'results': {
+                'total_replays': result.total_replays,
+                'successful': result.successful,
+                'skipped': result.skipped,
+                'failed': result.failed,
+                'total_bytes': result.total_bytes,
+                'failed_replays': result.failed_replays
+            }
         }
-        
-        import json
+
         log_file = f"download_log_{season_key}_{start_time.strftime('%Y%m%d_%H%M%S')}.json"
         with open(log_file, 'w') as f:
             json.dump(log_entry, f, indent=2)
-        
+
         print(f"\nLog saved: {log_file}")
-        
+
         # Upload log to S3
-        s3.upload_file(log_file, f"logs/{log_file}")
+        s3_backend = S3Backend()
+        s3_backend.s3_manager.upload_file(log_file, f"logs/{log_file}")
         print(f"Log backed up to S3")
         
     except KeyboardInterrupt:

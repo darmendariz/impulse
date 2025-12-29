@@ -23,5 +23,5 @@ wheels/
 # Other
 *.log
 /.DS_Store
-CLAUDE.md
-HANDOFF.md
+*.md
+!README.md
