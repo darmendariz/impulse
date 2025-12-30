@@ -70,12 +70,13 @@ class TestCollectionConfigFromEnv:
             'S3_BUCKET_NAME': 'env-bucket'
         }
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            config = CollectionConfig.from_env()
+        with patch('impulse.config.collection_config.load_dotenv'):
+            with patch.dict(os.environ, env_vars, clear=True):
+                config = CollectionConfig.from_env()
 
-            assert config.ballchasing_api_key == 'env-key-456'
-            assert config.aws_region == 'eu-west-1'
-            assert config.s3_bucket_name == 'env-bucket'
+                assert config.ballchasing_api_key == 'env-key-456'
+                assert config.aws_region == 'eu-west-1'
+                assert config.s3_bucket_name == 'env-bucket'
 
     def test_loads_with_only_required_env_var(self):
         """Config should work with only BALLCHASING_API_KEY set."""
@@ -83,21 +84,23 @@ class TestCollectionConfigFromEnv:
             'BALLCHASING_API_KEY': 'only-key'
         }
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            config = CollectionConfig.from_env()
+        with patch('impulse.config.collection_config.load_dotenv'):
+            with patch.dict(os.environ, env_vars, clear=True):
+                config = CollectionConfig.from_env()
 
-            assert config.ballchasing_api_key == 'only-key'
-            assert config.aws_region is None
-            assert config.s3_bucket_name is None
+                assert config.ballchasing_api_key == 'only-key'
+                assert config.aws_region is None
+                assert config.s3_bucket_name is None
 
     def test_raises_error_when_api_key_missing(self):
         """Should raise ValueError when BALLCHASING_API_KEY is missing."""
-        with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValueError) as exc_info:
-                CollectionConfig.from_env()
+        with patch('impulse.config.collection_config.load_dotenv'):
+            with patch.dict(os.environ, {}, clear=True):
+                with pytest.raises(ValueError) as exc_info:
+                    CollectionConfig.from_env()
 
-            assert 'BALLCHASING_API_KEY' in str(exc_info.value)
-            assert 'not found' in str(exc_info.value)
+                assert 'BALLCHASING_API_KEY' in str(exc_info.value)
+                assert 'not found' in str(exc_info.value)
 
     def test_aws_vars_are_optional(self):
         """AWS variables should be optional (only needed for S3)."""
@@ -105,12 +108,13 @@ class TestCollectionConfigFromEnv:
             'BALLCHASING_API_KEY': 'key-123'
         }
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            config = CollectionConfig.from_env()
+        with patch('impulse.config.collection_config.load_dotenv'):
+            with patch.dict(os.environ, env_vars, clear=True):
+                config = CollectionConfig.from_env()
 
-            # Should not raise error
-            assert config.aws_region is None
-            assert config.s3_bucket_name is None
+                # Should not raise error
+                assert config.aws_region is None
+                assert config.s3_bucket_name is None
 
 
 @pytest.mark.unit
