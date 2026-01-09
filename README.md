@@ -1,24 +1,24 @@
 # Impulse
 
-A Python library for collecting, parsing, and processing raw Rocket League replay files into structured data for general analysis or machine learning tasks.
+A Python library for collecting, parsing, and processing raw Rocket League `.replay` files into structured data for general analysis or machine learning tasks.
 
 ## Overview
 
-Impulse provides a complete and customizable pipeline for downloading Rocket League replays from [Ballchasing.com](https://ballchasing.com/) and extracting frame-by-frame ML-ready data from them. It handles the infrastructure concerns—rate limiting, deduplication, storage backends, resume capability—so you can easily create clean datasets from Ballchasing's repository of 140+ million replays in a few lines of code. 
+Impulse provides a complete and customizable pipeline for downloading Rocket League `.replay` files from [Ballchasing.com](https://ballchasing.com/) and extracting ML-ready data from them at frame-level precision. It handles the infrastructure concerns so you can easily create clean datasets from Ballchasing's repository of 140+ million replays in a few lines of code. 
 
-The library is designed to scale: download and process tens of thousands of replays with AWS storage/compute service integration, database registration, automatic progress tracking for big downloading/processing jobs, failure recovery, and configurable data quality validation.
+The library is designed to scale. With it, you can download and process tens of thousands of replays with AWS storage/compute service integration, database registration, automatic progress tracking for big downloading/processing jobs, failure recovery, and configurable data quality validation.
 
 ## Feature overview
 
 **Collection**
-- Ballchasing.com API client with automatic rate limiting 
-- Storage backends: local filesystem or AWS S3 (streaming, no temp files)
-- SQLite tracking for deduplication and resume capability
+- Ballchasing.com API client with automatic rate limiting and group tree parsing 
+- Supports multiple storage backends: local filesystem or AWS S3 (streaming, no temp files)
+- SQLite tracking for deduplication and download registration
 - Handles interruptions gracefully—resume downloads where you left off
 
 **Parsing**
 - High-performance parsing via [subtr-actor](https://github.com/rlrml/subtr-actor) (Rust-based parsing library)
-- Configurable feature extraction: ball physics, player positions/velocities, boost, etc.
+- Configurable feature extraction: frame-by-frame ball physics, player positions/velocities, boost, etc.
 - Multiple output formats: NumPy arrays, pandas DataFrames, Parquet files
 - Built-in data quality validation (frame/player bounds, NaN/Inf detection)
 - Feature deduplication and database schema standardization
@@ -26,7 +26,7 @@ The library is designed to scale: download and process tens of thousands of repl
 **Configuration**
 - `CollectionConfig`: API keys, storage settings, rate limits
 - `ParsingConfig`: Feature extraction presets, custom feature selection, FPS sampling settings
-- `PipelineConfig`: Data quality thresholds, feature deduplication strategy, schema settings
+- `PipelineConfig`: Data quality thresholds, feature deduplication strategy, database schema settings
 
 ## Architecture
 
