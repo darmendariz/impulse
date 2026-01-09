@@ -76,12 +76,20 @@ The library is designed to scale. With it, you can download and process tens of 
 - Ballchasing API key - [get one here](https://ballchasing.com/upload) (optional, if downloading replays)
 - AWS credentials (optional, for S3 storage)
 
-**Install**
+**Setup**
 ```bash
+# Clone the repository
 git clone https://github.com/darmendariz/impulse.git
 cd impulse
+
+# Install dependencies and the package
 uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate
 ```
+
+> **Note:** After running `uv sync`, you must activate the virtual environment with `source .venv/bin/activate` before running any scripts. Alternatively, you can run scripts directly with `.venv/bin/python scripts/script_name.py` without activating.
 
 **Environment Setup**
 
