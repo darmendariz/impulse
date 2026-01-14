@@ -28,47 +28,6 @@ The library is designed to scale. With it, you can download and process tens of 
 - `ParsingConfig`: Feature extraction presets, custom feature selection, FPS sampling settings
 - `PipelineConfig`: Data quality thresholds, feature deduplication strategy, database schema settings
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         COLLECTION                              │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │ Ballchasing  │───▶│    Memory    │───▶│  Local Storage   │   │
-│  │  REST API    │    │    Buffer    │    │    or AWS S3     │   │
-│  └──────────────┘    └──────────────┘    └──────────────────┘   │
-│         │                                         │             │
-│         ▼                                         │             │
-│  ┌──────────────┐                                 │             │
-│  │ Rate Limiter │                                 │             │
-│  │  (1/sec,     │                                 │             │
-│  │  200/hour)   │                                 │             │
-│  └──────────────┘                                 │             │
-│                                                   │             │
-│  ┌────────────────────────────────────────────────|─────┐       │
-│  │  SQLite Database (tracking, deduplication, resume)   |       │
-│  └──────────────────────────────────────────────────────┘       │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                          PARSING                                │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │ .replay file │───▶│  subtr-actor │───▶│   ML-Ready Data  │   │
-│  │              │    │   (Rust)     │    │  ├─ NumPy        │   │
-│  └──────────────┘    └──────────────┘    │  ├─ pandas       │   │
-│                             │            │  ├─ Parquet      │   │
-│                             │            │  └─ PyTorch*     │   │
-│                             ▼            └──────────────────┘   │
-│                      ┌──────────────┐         * planned         │
-│                      │   Metadata   │                           │
-│                      │ (teams, map, │                           │
-│                      │  duration)   │                           │
-│                      └──────────────┘                           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
 ## Installation
 
 **Prerequisites**
@@ -224,17 +183,3 @@ config = PipelineConfig(
 |---------|----------|---------|
 | [boxcars](https://github.com/nickbabcock/boxcars) | Rust | Low-level replay parsing—decodes the binary `.replay` format |
 | [subtr-actor](https://github.com/rlrml/subtr-actor) | Rust | Extracts frame-by-frame actor data into NumPy arrays (built on boxcars) |
-
-## Project Status
-
-| Module     | Status           | Description                                   |
-|------------|------------------|-----------------------------------------------|
-| Collection | Production-ready | Download from Ballchasing to local/S3         |
-| Parsing    | In development   | Parse replays to NumPy/pandas/Parquet         |
-| Analysis   | Planned          | ML dataset generation, analytics              |
-
-## Documentation
-
-## License
-
-MIT
