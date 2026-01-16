@@ -11,8 +11,9 @@ The library is designed to scale. With it, you can download and process tens of 
 ## Feature overview
 
 **Collection**
-- Ballchasing.com API client with automatic rate limiting and group tree parsing 
-- Supports multiple storage backends: local filesystem or AWS S3 (streaming, no temp files)
+- Ballchasing.com API client with automatic rate limiting and group tree parsing in order to download all replays in all child groups of a parent group
+- Supports multiple storage backends (local filesystem or AWS S3)
+- Run long downloading/processing jobs on an AWS EC2 instance to comply with Ballchasing rate limits and stream files directly to S3 bucket
 - SQLite tracking for deduplication and download registration
 - Handles interruptions gracefully—resume downloads where you left off
 
