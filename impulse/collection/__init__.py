@@ -68,6 +68,7 @@ from impulse.collection.storage import (
 )
 from impulse.collection.database import ImpulseDB
 from impulse.collection.rate_limiter import RateLimiter
+from impulse.collection.rlcs_manager import RLCSManager
 
 from impulse.config.collection_config import CollectionConfig
 from typing import Optional, List
@@ -172,6 +173,7 @@ __all__ = [
     'ReplayDownloader',
     'ImpulseDB',
     'RateLimiter',
+    'RLCSManager',
 
     # Storage backends
     'StorageBackend',
