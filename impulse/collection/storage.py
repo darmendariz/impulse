@@ -116,7 +116,7 @@ class LocalBackend(StorageBackend):
     Stores replay files in a local directory structure.
     """
 
-    def __init__(self, base_dir: str = "./replays"):
+    def __init__(self, base_dir: str = "./replays/raw"):
         """
         Initialize local storage backend.
 

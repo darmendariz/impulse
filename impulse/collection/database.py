@@ -12,7 +12,7 @@ from contextlib import contextmanager
 class ImpulseDB:
     """Manages SQLite database for replay tracking"""
     
-    def __init__(self, db_path: str = "./impulse.db"):
+    def __init__(self, db_path: str = "./replays/raw/raw_replays.db"):
         self.db_path = Path(db_path)
         self.init_database()
         print(f"✓ Database initialized: {self.db_path}")

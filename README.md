@@ -4,7 +4,7 @@ A Python library for collecting, parsing, and processing raw Rocket League `.rep
 
 ## Overview
 
-Impulse provides a complete and customizable pipeline for downloading Rocket League `.replay` files from [Ballchasing.com](https://ballchasing.com/) and extracting ML-ready data from them at frame-level precision. It handles the infrastructure concerns so you can easily create clean datasets from Ballchasing's repository of 140+ million replays in a few lines of code. 
+Impulse is a flexible API for performing machine learning on Rocket League game data. It provides a complete and customizable pipeline for downloading Rocket League `.replay` files from [Ballchasing.com](https://ballchasing.com/) and extracting ML-ready data from them at frame-level precision. It handles the infrastructure concerns so you can easily create clean datasets from Ballchasing's repository of 140+ million replays in a few lines of code. 
 
 The library is designed to scale. With it, you can download and process tens of thousands of replays with AWS storage/compute service integration, database registration, automatic progress tracking for big downloading/processing jobs, failure recovery, and configurable data quality validation.
 
@@ -36,17 +36,12 @@ The library is designed to scale. With it, you can download and process tens of 
 - Ballchasing API key - [get one here](https://ballchasing.com/upload) (optional, if downloading replays)
 - AWS credentials (optional, for S3 storage)
 
-**Setup**
+**Install**
 ```bash
-# Clone the repository
 git clone https://github.com/darmendariz/impulse.git
 cd impulse
-
-# Install dependencies and the package
 uv sync
-
-# Activate the virtual environment
-source .venv/bin/activate
+uv pip install -e .
 ```
 
 > **Note:** After running `uv sync`, you must activate the virtual environment with `source .venv/bin/activate` before running any scripts. Alternatively, you can run scripts directly with `.venv/bin/python scripts/script_name.py` without activating.

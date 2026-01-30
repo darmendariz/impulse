@@ -130,7 +130,7 @@ def download_group(
     # Initialize storage backend
     if storage_type == 'local':
         if output_dir is None:
-            output_dir = './replays'
+            output_dir = './replays/raw'
         storage = LocalBackend(base_dir=output_dir)
 
     elif storage_type == 's3':
