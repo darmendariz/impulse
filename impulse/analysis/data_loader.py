@@ -2,9 +2,9 @@
 Data Loader for EDA
 
 Loads parsed replay data (Parquet files) with support for:
-- Random sampling using the impulse.db for efficiency
+- Random sampling using the parsed_replays table in impulse.db
 - Lazy loading (load replays on demand)
-- Metadata access
+- Metadata access from both DB and JSON sidecar files
 """
 
 import sqlite3
@@ -19,11 +19,15 @@ class ReplayDataset:
     """
     Dataset interface for parsed replays.
 
-    Uses the impulse.db to efficiently sample replays without scanning directories.
-    Loads Parquet files on demand.
+    Uses the parsed_replays table in impulse.db to efficiently access replay data.
+    The table stores output_path directly, so no directory scanning is needed.
 
     Usage:
-        dataset = ReplayDataset('./replays/parsed', './replays/parsed/parsed_replays.db')
+        # Using database (recommended)
+        dataset = ReplayDataset(db_path='./impulse.db')
+
+        # Or scan a directory (fallback if no DB)
+        dataset = ReplayDataset(data_dir='./parsed_replays')
 
         # Load a random sample for EDA
         sample = dataset.load_sample(n=50)
@@ -34,71 +38,91 @@ class ReplayDataset:
     """
 
     def __init__(self,
-                 data_dir: str,
-                 db_path: str = "./impulse.db",
-                 use_db: bool = True):
+                 db_path: Optional[str] = "./impulse.db",
+                 data_dir: Optional[str] = None):
         """
         Initialize the dataset.
 
         Args:
-            data_dir: Directory containing .parquet files
-            db_path: Path to impulse.db for replay metadata
-            use_db: If True, use DB for replay list; if False, scan directory
+            db_path: Path to impulse.db containing parsed_replays table.
+                     If provided and exists, uses DB for replay lookup.
+            data_dir: Directory containing .parquet files.
+                      Used as fallback if db_path not provided or doesn't exist.
         """
-        self.data_dir = Path(data_dir)
-        self.db_path = Path(db_path)
-        self.use_db = use_db and self.db_path.exists()
+        self.db_path = Path(db_path) if db_path else None
+        self.data_dir = Path(data_dir) if data_dir else None
 
-        self._replay_ids: Optional[List[str]] = None
-        self._parquet_files: Optional[Dict[str, Path]] = None
+        # Determine mode: DB or directory scan
+        self.use_db = self.db_path is not None and self.db_path.exists()
+
+        if not self.use_db and self.data_dir is None:
+            raise ValueError("Must provide either db_path (existing) or data_dir")
+
+        self._replay_info: Optional[Dict[str, Dict]] = None
+
+    @property
+    def replay_info(self) -> Dict[str, Dict]:
+        """
+        Get mapping of replay_id -> info dict.
+
+        Info dict contains: output_path, frame_count, feature_count, fps, etc.
+        """
+        if self._replay_info is None:
+            self._load_replay_info()
+        return self._replay_info
 
     @property
     def replay_ids(self) -> List[str]:
         """Get list of available replay IDs."""
-        if self._replay_ids is None:
-            self._scan_replays()
-        return self._replay_ids
+        return list(self.replay_info.keys())
 
-    @property
-    def parquet_files(self) -> Dict[str, Path]:
-        """Get mapping of replay_id -> parquet file path."""
-        if self._parquet_files is None:
-            self._scan_replays()
-        return self._parquet_files
+    def _load_replay_info(self):
+        """Load replay information from DB or directory scan."""
+        self._replay_info = {}
 
-    def _scan_replays(self):
-        """Scan for available replays."""
-        self._parquet_files = {}
+        if self.use_db:
+            self._load_from_db()
+        else:
+            self._scan_directory()
 
-        # Scan directory for parquet files
+    def _load_from_db(self):
+        """Load replay info from parsed_replays table."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT replay_id, output_path, fps, frame_count, feature_count,
+                   file_size_bytes, parsed_at, metadata
+            FROM parsed_replays
+            WHERE parse_status = 'parsed'
+        """)
+
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            replay_id = row_dict['replay_id']
+            output_path = row_dict.get('output_path')
+
+            # Verify file exists
+            if output_path and Path(output_path).exists():
+                self._replay_info[replay_id] = row_dict
+
+        conn.close()
+        print(f"Found {len(self._replay_info)} parsed replays in database")
+
+    def _scan_directory(self):
+        """Fallback: scan directory for parquet files."""
         for pq_file in self.data_dir.rglob("*.parquet"):
             replay_id = pq_file.stem
-            self._parquet_files[replay_id] = pq_file
+            self._replay_info[replay_id] = {
+                'replay_id': replay_id,
+                'output_path': str(pq_file),
+                'frame_count': None,
+                'feature_count': None,
+                'fps': None,
+            }
 
-        # If using DB, filter to only downloaded replays
-        if self.use_db:
-            db_replay_ids = self._get_replay_ids_from_db()
-            # Keep only replays that exist both in DB and as files
-            self._replay_ids = [
-                rid for rid in db_replay_ids
-                if rid in self._parquet_files
-            ]
-        else:
-            self._replay_ids = list(self._parquet_files.keys())
-
-        print(f"Found {len(self._replay_ids)} replays in {self.data_dir}")
-
-    def _get_replay_ids_from_db(self) -> List[str]:
-        """Get downloaded replay IDs from database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT replay_id FROM raw_replays
-            WHERE download_status = 'downloaded'
-        """)
-        ids = [row[0] for row in cursor.fetchall()]
-        conn.close()
-        return ids
+        print(f"Found {len(self._replay_info)} parquet files in {self.data_dir}")
 
     def __len__(self) -> int:
         """Number of available replays."""
@@ -121,19 +145,42 @@ class ReplayDataset:
         Returns:
             Tuple of (DataFrame, metadata_dict) or (None, None) if not found
         """
-        if replay_id not in self.parquet_files:
+        if replay_id not in self.replay_info:
             print(f"Warning: Replay {replay_id} not found")
             return None, None
 
-        parquet_path = self.parquet_files[replay_id]
+        info = self.replay_info[replay_id]
+        parquet_path = Path(info['output_path'])
+
+        if not parquet_path.exists():
+            print(f"Warning: Parquet file not found: {parquet_path}")
+            return None, None
+
         df = pd.read_parquet(parquet_path)
 
-        # Try to load metadata
+        # Build metadata from DB info + JSON sidecar if available
+        metadata = {
+            'replay_id': replay_id,
+            'frame_count': info.get('frame_count'),
+            'feature_count': info.get('feature_count'),
+            'fps': info.get('fps'),
+            'parsed_at': info.get('parsed_at'),
+        }
+
+        # Try to load JSON sidecar metadata
         metadata_path = parquet_path.with_suffix('.metadata.json')
-        metadata = None
         if metadata_path.exists():
             with open(metadata_path) as f:
-                metadata = json.load(f)
+                json_metadata = json.load(f)
+                metadata.update(json_metadata)
+
+        # Parse DB metadata JSON if present
+        if info.get('metadata'):
+            try:
+                db_metadata = json.loads(info['metadata'])
+                metadata.update(db_metadata)
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         return df, metadata
 
@@ -165,29 +212,17 @@ class ReplayDataset:
         print(f"Loaded {len(results)} replays")
         return results
 
-    def get_replay_info_from_db(self, replay_id: str) -> Optional[Dict]:
+    def get_replay_info(self, replay_id: str) -> Optional[Dict]:
         """
-        Get replay info from database (without loading parquet).
+        Get replay info without loading the parquet file.
 
         Args:
             replay_id: Replay identifier
 
         Returns:
-            Dict with replay metadata from DB, or None
+            Dict with replay info from DB, or None if not found
         """
-        if not self.use_db:
-            return None
-
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM raw_replays WHERE replay_id = ?
-        """, (replay_id,))
-        row = cursor.fetchone()
-        conn.close()
-
-        return dict(row) if row else None
+        return self.replay_info.get(replay_id)
 
     def sample_replay_ids(self, n: int, seed: Optional[int] = None) -> List[str]:
         """
@@ -207,3 +242,37 @@ class ReplayDataset:
 
         n = min(n, len(self.replay_ids))
         return random.sample(self.replay_ids, n)
+
+    def get_frame_count_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of frame counts from DB without loading parquet files.
+
+        Only works when using DB mode.
+
+        Returns:
+            Dict with frame count statistics
+        """
+        if not self.use_db:
+            return {'error': 'Frame count summary requires database mode'}
+
+        frame_counts = [
+            info['frame_count']
+            for info in self.replay_info.values()
+            if info.get('frame_count') is not None
+        ]
+
+        if not frame_counts:
+            return {'error': 'No frame count data available'}
+
+        import numpy as np
+        frame_counts = np.array(frame_counts)
+
+        return {
+            'count': len(frame_counts),
+            'mean': float(frame_counts.mean()),
+            'std': float(frame_counts.std()),
+            'min': int(frame_counts.min()),
+            'max': int(frame_counts.max()),
+            'median': float(np.median(frame_counts)),
+            'total_frames': int(frame_counts.sum()),
+        }
