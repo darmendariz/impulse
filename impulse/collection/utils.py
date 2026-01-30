@@ -5,7 +5,9 @@ Contains helper functions for path sanitization, tree operations, and other
 common tasks used across the collection module.
 """
 
-from typing import List, Dict, Tuple
+import json
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
 
 
 def sanitize_path_component(name: str) -> str:
@@ -172,3 +174,91 @@ def extract_replay_metadata(ballchasing_replay: Dict) -> Dict:
         'date': ballchasing_replay.get('date', 'Unknown'),
         'source': 'ballchasing'
     }
+
+
+def get_tree_cache_path(group_id: str, cache_dir: Optional[Path] = None) -> Path:
+    """
+    Get the cache file path for a group tree.
+
+    Args:
+        group_id: Ballchasing group ID
+        cache_dir: Optional directory for cache files (defaults to ./replays/raw/cache)
+
+    Returns:
+        Path to the cache file
+    """
+    if cache_dir is None:
+        cache_dir = Path("./replays/raw/cache")
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"group_tree_{group_id}.json"
+
+
+def save_group_tree(tree: Dict, group_id: str, cache_dir: Optional[Path] = None) -> Path:
+    """
+    Save a group tree to a JSON cache file.
+
+    Args:
+        tree: Group tree structure from build_group_tree()
+        group_id: Ballchasing group ID
+        cache_dir: Optional directory for cache files
+
+    Returns:
+        Path to the saved cache file
+
+    Example:
+        >>> tree = client.build_group_tree('rlcs-2024-abc123')
+        >>> cache_path = save_group_tree(tree, 'rlcs-2024-abc123')
+        >>> print(f"Tree cached at: {cache_path}")
+    """
+    cache_path = get_tree_cache_path(group_id, cache_dir)
+
+    with open(cache_path, 'w') as f:
+        json.dump(tree, f, indent=2)
+
+    return cache_path
+
+
+def load_group_tree(group_id: str, cache_dir: Optional[Path] = None) -> Optional[Dict]:
+    """
+    Load a group tree from a JSON cache file.
+
+    Args:
+        group_id: Ballchasing group ID
+        cache_dir: Optional directory for cache files
+
+    Returns:
+        Cached tree structure, or None if cache doesn't exist
+
+    Example:
+        >>> tree = load_group_tree('rlcs-2024-abc123')
+        >>> if tree:
+        ...     replay_list = flatten_group_tree(tree)
+    """
+    cache_path = get_tree_cache_path(group_id, cache_dir)
+
+    if not cache_path.exists():
+        return None
+
+    with open(cache_path, 'r') as f:
+        return json.load(f)
+
+
+def delete_group_tree_cache(group_id: str, cache_dir: Optional[Path] = None) -> bool:
+    """
+    Delete a cached group tree file.
+
+    Args:
+        group_id: Ballchasing group ID
+        cache_dir: Optional directory for cache files
+
+    Returns:
+        True if file was deleted, False if it didn't exist
+    """
+    cache_path = get_tree_cache_path(group_id, cache_dir)
+
+    if cache_path.exists():
+        cache_path.unlink()
+        return True
+
+    return False

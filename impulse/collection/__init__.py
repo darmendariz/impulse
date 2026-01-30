@@ -69,6 +69,11 @@ from impulse.collection.storage import (
 from impulse.collection.database import ImpulseDB
 from impulse.collection.rate_limiter import RateLimiter
 from impulse.collection.rlcs_manager import RLCSManager
+from impulse.collection.utils import (
+    load_group_tree,
+    save_group_tree,
+    delete_group_tree_cache
+)
 
 from impulse.config.collection_config import CollectionConfig
 from typing import Optional, List
@@ -183,6 +188,11 @@ __all__ = [
     # Data classes
     'DownloadProgress',
     'DownloadResult',
+
+    # Tree cache utilities
+    'load_group_tree',
+    'save_group_tree',
+    'delete_group_tree_cache',
 
     # Configuration
     'CollectionConfig',

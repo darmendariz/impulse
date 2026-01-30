@@ -16,7 +16,10 @@ from impulse.collection.utils import (
     flatten_group_tree,
     build_path_components,
     sanitize_path_component,
-    extract_replay_metadata
+    extract_replay_metadata,
+    save_group_tree,
+    load_group_tree,
+    delete_group_tree_cache
 )
 
 logger = logging.getLogger('impulse.collection')
@@ -103,13 +106,15 @@ class ReplayDownloader:
         self,
         group_id: str,
         path_prefix: Optional[List[str]] = None,
-        include_root_in_path: bool = True
+        include_root_in_path: bool = True,
+        use_cache: bool = True,
+        only_replay_ids: Optional[List[str]] = None
     ) -> DownloadResult:
         """
         Download all replays from a Ballchasing group to storage.
 
         This method:
-        1. Builds the group tree (explores hierarchy)
+        1. Builds the group tree (or loads from cache)
         2. Registers replays in database (if enabled)
         3. Downloads each replay from Ballchasing
         4. Saves to storage backend
@@ -119,6 +124,10 @@ class ReplayDownloader:
             group_id: Ballchasing group ID
             path_prefix: Optional prefix for storage paths (e.g., ['replays', 'rlcs'])
             include_root_in_path: Whether to include root group name in storage path
+            use_cache: If True, load cached tree if available and save tree after building.
+                       This saves API calls on retries. Default True.
+            only_replay_ids: If provided, only download these specific replay IDs.
+                            Useful for retrying failed downloads.
 
         Returns:
             DownloadResult with statistics
@@ -132,27 +141,49 @@ class ReplayDownloader:
         """
         logger.info(f"Starting download for group: {group_id}")
 
-        # Build group tree
-        logger.info("Building group tree...")
+        # Try to load cached tree first
+        tree = None
+        if use_cache:
+            tree = load_group_tree(group_id)
+            if tree:
+                logger.info("Loaded group tree from cache")
+                print("Using cached group tree (no API calls needed)")
 
-        def tree_progress(message, depth):
-            indent = "  " * depth
-            print(f"{indent}{message}")
+        # Build group tree if not cached
+        if tree is None:
+            logger.info("Building group tree...")
 
-        tree = self.client.build_group_tree(group_id, progress_callback=tree_progress)
+            def tree_progress(message, depth):
+                indent = "  " * depth
+                print(f"{indent}{message}")
+
+            tree = self.client.build_group_tree(group_id, progress_callback=tree_progress)
+
+            # Save tree to cache for future retries
+            if use_cache:
+                cache_path = save_group_tree(tree, group_id)
+                logger.info(f"Group tree cached at: {cache_path}")
+                print(f"Group tree cached for future retries")
 
         # Flatten to replay list
         logger.info("Flattening tree structure...")
         replay_list = flatten_group_tree(tree)
+        total_in_tree = len(replay_list)
+        logger.info(f"Found {total_in_tree} total replays in tree")
+
+        # Filter to specific replay IDs if requested (for retries)
+        if only_replay_ids:
+            filter_set = set(only_replay_ids)
+            replay_list = [(r, p) for r, p in replay_list if r['id'] in filter_set]
+            logger.info(f"Filtered to {len(replay_list)} replays for retry")
+            print(f"Retrying {len(replay_list)} specific replays")
+
         total_replays = len(replay_list)
-        logger.info(f"Found {total_replays} total replays")
 
-        # Register group in database
-        if self.db:
-            self.db.register_group_download(tree['id'], tree['name'], total_replays)
+        # Register group and replays in database (skip if filtering for retry)
+        if self.db and not only_replay_ids:
+            self.db.register_group_download(tree['id'], tree['name'], total_in_tree)
 
-        # Register replays in database
-        if self.db:
             logger.info("Registering replays in database...")
             new_count = 0
             existing_count = 0
@@ -369,4 +400,44 @@ class ReplayDownloader:
             total_bytes=total_bytes,
             storage_keys=storage_keys,
             failed_replays=failed_replays
+        )
+
+    def retry_failed_downloads(
+        self,
+        group_id: str,
+        failed_replays: List[Dict],
+        path_prefix: Optional[List[str]] = None,
+        include_root_in_path: bool = True
+    ) -> DownloadResult:
+        """
+        Retry downloading failed replays using the cached group tree.
+
+        A convenience wrapper around download_group() that accepts the
+        failed_replays list from a previous DownloadResult.
+
+        Args:
+            group_id: Ballchasing group ID (must have a cached tree)
+            failed_replays: The failed_replays list from a previous DownloadResult
+                           (list of dicts with 'replay_id' key)
+            path_prefix: Optional prefix for storage paths
+            include_root_in_path: Whether to include root group name in storage path
+
+        Returns:
+            DownloadResult with statistics for the retry attempt
+
+        Example:
+            >>> result = downloader.download_group('rlcs-2024-abc123')
+            >>> if result.failed_replays:
+            ...     retry_result = downloader.retry_failed_downloads(
+            ...         'rlcs-2024-abc123',
+            ...         result.failed_replays
+            ...     )
+        """
+        replay_ids = [r['replay_id'] for r in failed_replays]
+        return self.download_group(
+            group_id=group_id,
+            path_prefix=path_prefix,
+            include_root_in_path=include_root_in_path,
+            use_cache=True,
+            only_replay_ids=replay_ids
         )
