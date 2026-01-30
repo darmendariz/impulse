@@ -22,6 +22,6 @@ wheels/
 
 # Other
 *.log
-/.DS_Store
+.DS_Store
 *.md
 !README.md

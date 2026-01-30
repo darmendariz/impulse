@@ -93,7 +93,7 @@ class ReplayDataset:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT replay_id FROM replays
+            SELECT replay_id FROM raw_replays
             WHERE download_status = 'downloaded'
         """)
         ids = [row[0] for row in cursor.fetchall()]
@@ -182,7 +182,7 @@ class ReplayDataset:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM replays WHERE replay_id = ?
+            SELECT * FROM raw_replays WHERE replay_id = ?
         """, (replay_id,))
         row = cursor.fetchone()
         conn.close()
