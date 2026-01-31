@@ -103,8 +103,19 @@ class ReplayDataset:
             replay_id = row_dict['replay_id']
             output_path = row_dict.get('output_path')
 
-            # Verify file exists
-            if output_path and Path(output_path).exists():
+            if not output_path:
+                continue
+
+            # Handle relative paths by checking data_dir
+            path = Path(output_path)
+            if not path.is_absolute() and self.data_dir:
+                # DB stores relative paths like 'replays/parsed/XXX.parquet'
+                # Try resolving using just the filename in data_dir
+                resolved_path = self.data_dir / path.name
+                if resolved_path.exists():
+                    row_dict['output_path'] = str(resolved_path)
+                    self._replay_info[replay_id] = row_dict
+            elif path.exists():
                 self._replay_info[replay_id] = row_dict
 
         conn.close()
