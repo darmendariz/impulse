@@ -19,6 +19,7 @@ wheels/
 *.db
 *.json
 *.npy
+*.parquet
 
 # Other
 *.log

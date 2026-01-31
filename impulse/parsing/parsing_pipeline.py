@@ -170,11 +170,11 @@ class ParsingPipeline:
                 self.db.mark_parse_failed(replay_id, replay_id, format_result.error)
             return format_result
 
-        # Register in database
+        # Register in database (use raw_replay_id as primary key for consistent tracking)
         if self.db:
             metadata_json = json.dumps(format_result.metadata) if format_result.metadata else None
             self.db.add_parsed_replay(
-                replay_id=format_result.replay_id,
+                replay_id=replay_id,
                 raw_replay_id=replay_id,
                 output_path=format_result.parquet_path,
                 output_format='parquet',
@@ -281,11 +281,11 @@ class ParsingPipeline:
                 if not format_result.success:
                     raise Exception(format_result.error)
 
-                # Register in database
+                # Register in database (use raw_replay_id as primary key for consistent tracking)
                 if self.db:
                     metadata_json = json.dumps(format_result.metadata) if format_result.metadata else None
                     self.db.add_parsed_replay(
-                        replay_id=format_result.replay_id,
+                        replay_id=replay_id,
                         raw_replay_id=replay_id,
                         output_path=format_result.parquet_path,
                         output_format='parquet',

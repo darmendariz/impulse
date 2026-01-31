@@ -226,6 +226,8 @@ class ImpulseDB:
         """
         Register a successfully parsed replay.
 
+        If the replay was previously marked as failed, updates it to parsed status.
+
         Args:
             replay_id: Unique ID for the parsed output (can be same as raw_replay_id)
             raw_replay_id: ID of the source raw replay
@@ -238,14 +240,10 @@ class ImpulseDB:
             metadata: Optional JSON string with additional metadata
 
         Returns:
-            True if this is a new entry, False if it already existed
+            True if this is a new entry, False if updating existing entry
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-
-            cursor.execute("SELECT replay_id FROM parsed_replays WHERE replay_id = ?", (replay_id,))
-            if cursor.fetchone() is not None:
-                return False
 
             cursor.execute("""
                 INSERT INTO parsed_replays (
@@ -254,13 +252,24 @@ class ImpulseDB:
                     parsed_at, parse_status, metadata
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?)
+                ON CONFLICT(replay_id) DO UPDATE SET
+                    output_path = excluded.output_path,
+                    output_format = excluded.output_format,
+                    fps = excluded.fps,
+                    frame_count = excluded.frame_count,
+                    feature_count = excluded.feature_count,
+                    file_size_bytes = excluded.file_size_bytes,
+                    parsed_at = excluded.parsed_at,
+                    parse_status = 'parsed',
+                    error_message = NULL,
+                    metadata = excluded.metadata
             """, (
                 replay_id, raw_replay_id, output_path, output_format,
                 fps, frame_count, feature_count, file_size_bytes,
                 datetime.now(timezone.utc).isoformat(), metadata
             ))
 
-            return True
+            return cursor.rowcount > 0
 
     def is_replay_parsed(self, replay_id: str) -> bool:
         """Check if a replay has been parsed already."""
@@ -285,13 +294,14 @@ class ImpulseDB:
             """, (replay_id, raw_replay_id, error_message))
 
     def get_unparsed_replays(self, limit: Optional[int] = None) -> List[Dict]:
-        """Get downloaded replays that haven't been parsed yet."""
+        """Get downloaded replays that haven't been successfully parsed yet."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             query = """
                 SELECT r.replay_id, r.title, r.storage_key, r.file_size_bytes
                 FROM raw_replays r
                 LEFT JOIN parsed_replays p ON r.replay_id = p.raw_replay_id
+                    AND p.parse_status = 'parsed'
                 WHERE r.is_downloaded = 1 AND p.replay_id IS NULL
             """
             if limit:
