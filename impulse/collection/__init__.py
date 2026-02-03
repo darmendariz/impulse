@@ -1,7 +1,9 @@
 """
 Impulse Collection Module - Rocket League Replay Data Collection
 
-This module provides tools for downloading and organizing Rocket League replay files
+This module is all about collecting and organizing raw Rocket League `.replay` files.
+
+It provides tools for downloading raw replay files 
 from Ballchasing.com, with support for multiple storage backends (local, S3) and
 database tracking for deduplication and resume capability.
 

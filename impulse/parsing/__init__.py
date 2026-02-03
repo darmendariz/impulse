@@ -1,9 +1,11 @@
 """
 Impulse Parsing Module - Rocket League Replay Parsing
 
-This module provides tools for parsing Rocket League replay files into
+This module facilitates extracting usable, structured data from collections of raw Rocket League replay files. 
+
+It provides tools for parsing `.replay` files into
 structured data formats (NumPy arrays, DataFrames, Parquet files) using
-the subtr-actor library.
+the subtr-actor library, as well as pipelines for managing large-scale parsing tasks.
 
 ## Quick Start
 
