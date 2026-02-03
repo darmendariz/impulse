@@ -10,10 +10,13 @@ Functions for analyzing parsed replay data, including:
 Designed for use in Jupyter notebooks.
 """
 
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+if TYPE_CHECKING:
+    from impulse.replay_dataset import ReplayData
 
 # Optional imports with fallbacks
 try:
@@ -27,12 +30,12 @@ except ImportError:
 # Dataset Summary
 # =============================================================================
 
-def summarize_dataset(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]]) -> Dict[str, Any]:
+def summarize_dataset(replays: "List[ReplayData]") -> Dict[str, Any]:
     """
     Compute summary statistics for a collection of replays.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples from ReplayDataset
+        replays: List of ReplayData objects from ReplayDataset
 
     Returns:
         Dict with summary statistics
@@ -44,16 +47,16 @@ def summarize_dataset(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]]) -
     feature_counts = []
     player_counts = []
 
-    for replay_id, df, metadata in replays:
-        frame_counts.append(len(df))
-        feature_counts.append(len(df.columns))
+    for replay in replays:
+        frame_counts.append(len(replay.frames))
+        feature_counts.append(len(replay.frames.columns))
 
         # Count actual players (non-NaN player columns)
-        if metadata and 'parsing_info' in metadata:
-            player_counts.append(metadata['parsing_info'].get('num_players', 0))
+        if replay.metadata and 'parsing_info' in replay.metadata:
+            player_counts.append(replay.metadata['parsing_info'].get('num_players', 0))
         else:
             # Estimate from columns
-            player_cols = [c for c in df.columns if c.startswith('p') and '_' in c]
+            player_cols = [c for c in replay.frames.columns if c.startswith('p') and '_' in c]
             if player_cols:
                 max_player_idx = max(int(c.split('_')[0][1:]) for c in player_cols)
                 player_counts.append(max_player_idx + 1)
@@ -74,7 +77,7 @@ def summarize_dataset(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]]) -
         },
         'feature_count': feature_counts[0] if feature_counts else 0,
         'player_counts': dict(zip(*np.unique(player_counts, return_counts=True))) if player_counts else {},
-        'feature_names': list(replays[0][1].columns) if replays else [],
+        'feature_names': list(replays[0].frames.columns) if replays else [],
     }
 
 
@@ -105,13 +108,13 @@ def print_summary(summary: Dict[str, Any]):
 # Feature Statistics
 # =============================================================================
 
-def compute_feature_stats(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
+def compute_feature_stats(replays: "List[ReplayData]",
                           features: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Compute statistics for each feature across all replays.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
         features: Optional list of feature names to analyze (default: all)
 
     Returns:
@@ -121,7 +124,7 @@ def compute_feature_stats(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]
         return pd.DataFrame()
 
     # Determine features to analyze
-    all_features = list(replays[0][1].columns)
+    all_features = list(replays[0].frames.columns)
     if features is None:
         features = [f for f in all_features if f != 'frame']
 
@@ -129,9 +132,9 @@ def compute_feature_stats(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]
     for feature in features:
         # Concatenate this feature from all replays
         values = []
-        for _, df, _ in replays:
-            if feature in df.columns:
-                values.append(df[feature].values)
+        for replay in replays:
+            if feature in replay.frames.columns:
+                values.append(replay.frames[feature].values)
 
         if not values:
             continue
@@ -163,25 +166,23 @@ def compute_feature_stats(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]
 # Sequence Length Analysis
 # =============================================================================
 
-def get_sequence_lengths(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]]) -> pd.DataFrame:
+def get_sequence_lengths(replays: "List[ReplayData]") -> pd.DataFrame:
     """
     Get frame counts for all replays.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
 
     Returns:
         DataFrame with replay_id and frame_count columns
     """
     data = []
-    for replay_id, df, metadata in replays:
-        duration = None
-        if metadata and 'duration_seconds' in metadata:
-            duration = metadata['duration_seconds']
+    for replay in replays:
+        duration = replay.metadata.get('duration_seconds') if replay.metadata else None
 
         data.append({
-            'replay_id': replay_id,
-            'frame_count': len(df),
+            'replay_id': replay.replay_id,
+            'frame_count': len(replay.frames),
             'duration_seconds': duration,
         })
 
@@ -192,21 +193,21 @@ def get_sequence_lengths(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]]
 # Visualization
 # =============================================================================
 
-def plot_sequence_length_distribution(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
+def plot_sequence_length_distribution(replays: "List[ReplayData]",
                                       bins: int = 30,
                                       figsize: Tuple[int, int] = (10, 4)) -> plt.Figure:
     """
     Plot histogram of replay lengths (frame counts).
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
         bins: Number of histogram bins
         figsize: Figure size
 
     Returns:
         matplotlib Figure
     """
-    frame_counts = [len(df) for _, df, _ in replays]
+    frame_counts = [len(replay.frames) for replay in replays]
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
@@ -230,7 +231,7 @@ def plot_sequence_length_distribution(replays: List[Tuple[str, pd.DataFrame, Opt
     return fig
 
 
-def plot_feature_distributions(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
+def plot_feature_distributions(replays: "List[ReplayData]",
                                features: List[str],
                                figsize: Optional[Tuple[int, int]] = None,
                                bins: int = 50) -> plt.Figure:
@@ -238,7 +239,7 @@ def plot_feature_distributions(replays: List[Tuple[str, pd.DataFrame, Optional[D
     Plot histograms for specified features.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
         features: List of feature names to plot
         figsize: Optional figure size (auto-calculated if None)
         bins: Number of histogram bins
@@ -261,9 +262,9 @@ def plot_feature_distributions(replays: List[Tuple[str, pd.DataFrame, Optional[D
     for i, feature in enumerate(features):
         # Concatenate feature from all replays
         values = []
-        for _, df, _ in replays:
-            if feature in df.columns:
-                values.append(df[feature].dropna().values)
+        for replay in replays:
+            if feature in replay.frames.columns:
+                values.append(replay.frames[feature].dropna().values)
 
         if values:
             all_values = np.concatenate(values)
@@ -363,14 +364,14 @@ def plot_trajectory_2d(df: pd.DataFrame,
     return fig
 
 
-def plot_correlation_matrix(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
+def plot_correlation_matrix(replays: "List[ReplayData]",
                             features: Optional[List[str]] = None,
                             figsize: Tuple[int, int] = (12, 10)) -> plt.Figure:
     """
     Plot correlation matrix for features.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
         features: Optional list of features (default: auto-select numeric ball features)
         figsize: Figure size
 
@@ -378,7 +379,7 @@ def plot_correlation_matrix(replays: List[Tuple[str, pd.DataFrame, Optional[Dict
         matplotlib Figure
     """
     # Concatenate all replays
-    dfs = [df for _, df, _ in replays]
+    dfs = [replay.frames for replay in replays]
     combined = pd.concat(dfs, ignore_index=True)
 
     # Select features
@@ -451,13 +452,13 @@ def detect_impacts(df: pd.DataFrame,
     return impact_frames
 
 
-def analyze_impacts(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
+def analyze_impacts(replays: "List[ReplayData]",
                     threshold: float = 500.0) -> Dict[str, Any]:
     """
     Analyze ball impact patterns across replays.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
         threshold: Velocity change threshold for impact detection
 
     Returns:
@@ -466,8 +467,8 @@ def analyze_impacts(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
     all_time_between = []
     impacts_per_replay = []
 
-    for replay_id, df, _ in replays:
-        impact_frames = detect_impacts(df, threshold)
+    for replay in replays:
+        impact_frames = detect_impacts(replay.frames, threshold)
         impacts_per_replay.append(len(impact_frames))
 
         if len(impact_frames) > 1:
@@ -531,7 +532,7 @@ def plot_velocity_with_impacts(df: pd.DataFrame,
     return fig
 
 
-def plot_time_between_impacts(replays: List[Tuple[str, pd.DataFrame, Optional[Dict]]],
+def plot_time_between_impacts(replays: "List[ReplayData]",
                               threshold: float = 500.0,
                               fps: float = 10.0,
                               bins: int = 50,
@@ -540,7 +541,7 @@ def plot_time_between_impacts(replays: List[Tuple[str, pd.DataFrame, Optional[Di
     Plot distribution of time between impacts.
 
     Args:
-        replays: List of (replay_id, DataFrame, metadata) tuples
+        replays: List of ReplayData objects
         threshold: Impact detection threshold
         fps: Frames per second (for converting to seconds)
         bins: Number of histogram bins

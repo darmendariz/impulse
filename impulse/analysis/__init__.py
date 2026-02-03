@@ -4,7 +4,8 @@ Impulse Analysis Module
 Exploratory data analysis for parsed replay data.
 
 Usage:
-    from impulse.analysis import ReplayDataset, summarize_dataset, plot_sequence_length_distribution
+    from impulse.analysis import summarize_dataset, plot_sequence_length_distribution
+    from impulse.replay_dataset import ReplayDataset
 
     # Load data
     dataset = ReplayDataset('./parsed_replays')
@@ -18,7 +19,7 @@ Usage:
     plot_sequence_length_distribution(sample)
 """
 
-from impulse.analysis.data_loader import ReplayDataset
+from impulse.replay_dataset import ReplayDataset, ReplayData
 from impulse.analysis.eda import (
     # Dataset summary
     summarize_dataset,
@@ -43,6 +44,7 @@ from impulse.analysis.eda import (
 __all__ = [
     # Data loading
     'ReplayDataset',
+    'ReplayData',
     # Dataset summary
     'summarize_dataset',
     'print_summary',

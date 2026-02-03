@@ -1,40 +1,94 @@
 """
-Data Loader for EDA
+Replay Dataset - Data Access Layer
 
-Loads parsed replay data (Parquet files) with support for:
-- Random sampling using the parsed_replays table in impulse.db
-- Lazy loading (load replays on demand)
-- Metadata access from both DB and JSON sidecar files
+Provides a clean interface for loading and working with parsed replay data.
+This module bridges the parsing output (Parquet files) and downstream usage
+(analysis, training, inference).
+
+Key classes:
+    ReplayData: Container for a single replay's frame data and metadata.
+    ReplayDataset: Interface for accessing collections of parsed replays.
+
+The dataset supports both small collections (load all into memory) and large
+collections (lazy iteration, batched loading) for memory efficiency.
 """
 
 import sqlite3
 import random
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Iterator, Tuple
+from typing import List, Dict, Any, Optional, Iterator
 import pandas as pd
 import json
 
 
+@dataclass
+class ReplayData:
+    """
+    A loaded replay with its frame data and metadata.
+
+    Attributes:
+        replay_id: Unique identifier for this replay
+        frames: DataFrame containing the parsed frame data
+        metadata: Dictionary of metadata (team info, match details, etc.)
+
+    Metadata fields can be accessed directly as attributes:
+        replay.team_size  # equivalent to replay.metadata.get('team_size')
+    """
+    replay_id: str
+    frames: pd.DataFrame
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __getattr__(self, name: str) -> Any:
+        """Allow accessing metadata fields as attributes."""
+        metadata = self.__dict__.get('metadata', {})
+        if metadata and name in metadata:
+            return metadata[name]
+        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+
+
 class ReplayDataset:
     """
-    Dataset interface for parsed replays.
+    Dataset interface for accessing parsed replays.
 
-    Uses the parsed_replays table in impulse.db to efficiently access replay data.
-    The table stores output_path directly, so no directory scanning is needed.
+    Acts as a data access layer between parsed Parquet files and downstream
+    consumers (analysis, training, etc.). Supports efficient access patterns
+    for both small and large collections.
+
+    Data sources:
+        - Database mode (recommended): Uses parsed_replays table in impulse.db
+          for fast lookup without directory scanning.
+        - Directory mode (fallback): Scans a directory for .parquet files.
+
+    Loading strategies:
+        - load_all(): Load everything into memory (small datasets)
+        - load_sample(n): Load a random subset (EDA, prototyping)
+        - __iter__(): Lazy iteration, one replay at a time (memory-efficient)
+        - iter_batches(n): Batched iteration (large-scale processing)
 
     Usage:
-        # Using database (recommended)
-        dataset = ReplayDataset(db_path='./impulse.db')
+        # Initialize with database (recommended)
+        dataset = ReplayDataset(db_path='./impulse.db', data_dir='./parsed')
 
-        # Or scan a directory (fallback if no DB)
+        # Or scan a directory directly
         dataset = ReplayDataset(data_dir='./parsed_replays')
 
-        # Load a random sample for EDA
-        sample = dataset.load_sample(n=50)
+        # Small dataset: load everything
+        replays = dataset.load_all()
+        for replay in replays:
+            print(replay.team_size)
+            process(replay.frames)
 
-        # Iterate over all replays
-        for replay_id, df, metadata in dataset:
-            process(df)
+        # Large dataset: iterate one at a time
+        for replay in dataset:
+            process(replay.frames)
+
+        # Large dataset: process in batches
+        for batch in dataset.iter_batches(batch_size=100):
+            process_batch(batch)
+
+        # Random sample for EDA
+        sample = dataset.load_sample(n=50, seed=42)
     """
 
     def __init__(self,
@@ -139,14 +193,14 @@ class ReplayDataset:
         """Number of available replays."""
         return len(self.replay_ids)
 
-    def __iter__(self) -> Iterator[Tuple[str, pd.DataFrame, Optional[Dict]]]:
-        """Iterate over all replays, yielding (replay_id, dataframe, metadata)."""
+    def __iter__(self) -> Iterator[ReplayData]:
+        """Iterate over all replays, yielding ReplayData objects one at a time."""
         for replay_id in self.replay_ids:
-            df, metadata = self.load_replay(replay_id)
-            if df is not None:
-                yield replay_id, df, metadata
+            replay = self.load_replay(replay_id)
+            if replay is not None:
+                yield replay
 
-    def load_replay(self, replay_id: str) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
+    def load_replay(self, replay_id: str) -> Optional[ReplayData]:
         """
         Load a single replay by ID.
 
@@ -154,18 +208,18 @@ class ReplayDataset:
             replay_id: Replay identifier
 
         Returns:
-            Tuple of (DataFrame, metadata_dict) or (None, None) if not found
+            ReplayData object, or None if not found
         """
         if replay_id not in self.replay_info:
             print(f"Warning: Replay {replay_id} not found")
-            return None, None
+            return None
 
         info = self.replay_info[replay_id]
         parquet_path = Path(info['output_path'])
 
         if not parquet_path.exists():
             print(f"Warning: Parquet file not found: {parquet_path}")
-            return None, None
+            return None
 
         df = pd.read_parquet(parquet_path)
 
@@ -193,11 +247,9 @@ class ReplayDataset:
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        return df, metadata
+        return ReplayData(replay_id=replay_id, frames=df, metadata=metadata)
 
-    def load_sample(self,
-                    n: int = 50,
-                    seed: Optional[int] = None) -> List[Tuple[str, pd.DataFrame, Optional[Dict]]]:
+    def load_sample(self, n: int = 50, seed: Optional[int] = None) -> List[ReplayData]:
         """
         Load a random sample of replays.
 
@@ -206,7 +258,7 @@ class ReplayDataset:
             seed: Random seed for reproducibility
 
         Returns:
-            List of (replay_id, DataFrame, metadata) tuples
+            List of ReplayData objects
         """
         if seed is not None:
             random.seed(seed)
@@ -216,12 +268,51 @@ class ReplayDataset:
 
         results = []
         for replay_id in sampled_ids:
-            df, metadata = self.load_replay(replay_id)
-            if df is not None:
-                results.append((replay_id, df, metadata))
+            replay = self.load_replay(replay_id)
+            if replay is not None:
+                results.append(replay)
 
         print(f"Loaded {len(results)} replays")
         return results
+
+    def load_all(self) -> List[ReplayData]:
+        """
+        Load all replays in the dataset.
+
+        Returns:
+            List of ReplayData objects
+        """
+        results = []
+        for replay_id in self.replay_ids:
+            replay = self.load_replay(replay_id)
+            if replay is not None:
+                results.append(replay)
+
+        print(f"Loaded {len(results)} replays")
+        return results
+
+    def iter_batches(self, batch_size: int = 100) -> Iterator[List[ReplayData]]:
+        """
+        Iterate over replays in batches.
+
+        Memory-efficient for large datasets: only one batch is in memory at a time.
+
+        Args:
+            batch_size: Number of replays per batch
+
+        Yields:
+            Lists of ReplayData objects, each list up to batch_size
+        """
+        batch = []
+        for replay_id in self.replay_ids:
+            replay = self.load_replay(replay_id)
+            if replay is not None:
+                batch.append(replay)
+                if len(batch) >= batch_size:
+                    yield batch
+                    batch = []
+        if batch:
+            yield batch
 
     def get_replay_info(self, replay_id: str) -> Optional[Dict]:
         """
