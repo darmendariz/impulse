@@ -203,8 +203,8 @@ class ParseResultFormatter:
             )
 
         try:
-            # Extract replay ID
-            replay_id = self._extract_replay_id(parse_result.metadata)
+            # Use filename stem as replay_id for consistent naming
+            replay_id = Path(parse_result.replay_path).stem
 
             # Deduplicate features (pass feature lists directly)
             deduplicated_array, column_names = self._deduplicate_features(
@@ -486,12 +486,6 @@ class ParseResultFormatter:
         
         return padded_array, padded_columns
     
-    def _extract_replay_id(self, metadata: Dict[str, Any]) -> str:
-        """Extract replay ID from metadata."""
-        replay_meta = metadata.get('replay_meta', {})
-        all_headers = dict(replay_meta.get('all_headers', []))
-        return all_headers.get('Id', 'unknown')
-    
     def _extract_metadata(self, parse_result: ParseResult) -> Dict[str, Any]:
         """
         Extract clean metadata for storage.
@@ -507,8 +501,9 @@ class ParseResultFormatter:
         all_headers = dict(replay_meta.get('all_headers', []))
         
         return {
+            'replay_id': Path(parse_result.replay_path).stem,
             'source_file': parse_result.replay_path,
-            'replay_id': all_headers.get('Id'),
+            'ballchasing_id': all_headers.get('Id'),
             'replay_name': all_headers.get('ReplayName'),
             'date': all_headers.get('Date'),
             'map': all_headers.get('MapName'),
