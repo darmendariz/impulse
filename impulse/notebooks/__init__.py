@@ -20,7 +20,7 @@ Usage:
 """
 
 from impulse.replay_dataset import ReplayDataset, ReplayData
-from impulse.analysis.eda import (
+from impulse.notebooks.eda import (
     # Dataset summary
     summarize_dataset,
     print_summary,
