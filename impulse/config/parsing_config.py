@@ -196,7 +196,7 @@ class ParsingConfig:
     
     # Parsing settings and validation constants
     DEFAULT_FEATURE_PRESET = 'standard'
-    DEFAULT_FPS = 10.0          # Default frame sampling rate for parsing replays
+    DEFAULT_FPS = 30.0          # Default frame sampling rate for parsing replays
     MIN_FPS = 1.0
     MAX_FPS = 120.0             # TODO: determine default fps at which replay files are created by the game client 
                                 # (I think it's 30 but not sure). Once determined, MAX_FPS should be set to that value.
