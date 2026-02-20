@@ -1,0 +1,86 @@
+site_name: Impulse
+site_description: A Python library for collecting, parsing, and processing Rocket League replay files for machine learning.
+site_url: https://darmendariz.github.io/impulse
+repo_url: https://github.com/darmendariz/impulse
+repo_name: darmendariz/impulse
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+  - Collection:
+    - Overview: collection/overview.md
+    - Downloading Replays: collection/downloading.md
+    - Storage Backends: collection/storage.md
+    - RLCS Seasons: collection/rlcs.md
+    - API Reference: collection/api-reference.md
+  - Parsing:
+    - Overview: parsing/overview.md
+    - Feature Extraction: parsing/features.md
+    - Output Formats: parsing/output-formats.md
+    - API Reference: parsing/api-reference.md
+  - Configuration:
+    - Overview: configuration/index.md
+  - Reference:
+    - Database: reference/database.md
+    - Changelog: reference/changelog.md

@@ -70,7 +70,7 @@ class ReplayParser:
         self.fps = fps
     
     @classmethod
-    def from_preset(cls, preset_name: str, fps: float = ParsingConfig.DEFAULT_FPS):
+    def from_preset(cls, preset_name: str, fps: float = ParsingConfig.DEFAULT_FPS) -> "ReplayParser":
         """
         Create parser from a feature preset.
         
