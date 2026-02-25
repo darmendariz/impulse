@@ -22,7 +22,7 @@ class BallchasingClient:
     For high-level download workflows, use ReplayDownloader instead.
     """
 
-    def __init__(self, config: CollectionConfig = None):
+    def __init__(self, config: CollectionConfig = None, rate_limit_per_second: int = None, rate_limit_per_hour: int = None):
         """
         Initialize Ballchasing API client.
 
@@ -35,8 +35,8 @@ class BallchasingClient:
         self.config = config
         self.api_key = config.ballchasing_api_key
         self.base_url = "https://ballchasing.com/api"
-        self.rate_limit_per_second = config.rate_limit_per_second
-        self.rate_limit_per_hour = config.rate_limit_per_hour
+        self.rate_limit_per_second = rate_limit_per_second if rate_limit_per_second else config.rate_limit_per_second
+        self.rate_limit_per_hour = rate_limit_per_hour if rate_limit_per_hour else config.rate_limit_per_hour
 
 
         # Create HTTP session with auth headers

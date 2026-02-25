@@ -29,7 +29,7 @@ class CollectionConfig:
     aws_region: Optional[str] = None
     s3_bucket_name: Optional[str] = None
     database_path: str = "./impulse.db"
-    rate_limit_per_second: float = 1.0
+    rate_limit_per_second: int = 1
     rate_limit_per_hour: int = 200
 
     @classmethod
