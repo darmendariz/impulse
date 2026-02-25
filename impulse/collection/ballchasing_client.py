@@ -7,9 +7,9 @@ Handles only HTTP requests and responses - no orchestration logic.
 
 import requests
 import time
+from requests_ratelimiter import LimiterSession
 from typing import List, Dict, Optional
 from impulse.config.collection_config import CollectionConfig
-from impulse.collection.rate_limiter import RateLimiter
 
 
 class BallchasingClient:
@@ -22,13 +22,12 @@ class BallchasingClient:
     For high-level download workflows, use ReplayDownloader instead.
     """
 
-    def __init__(self, config: CollectionConfig = None, rate_limiter: RateLimiter = None):
+    def __init__(self, config: CollectionConfig = None):
         """
         Initialize Ballchasing API client.
 
         Args:
             config: Configuration object (defaults to loading from environment)
-            rate_limiter: Optional rate limiter (creates default if not provided)
         """
         if config is None:
             config = CollectionConfig.from_env()
@@ -36,13 +35,12 @@ class BallchasingClient:
         self.config = config
         self.api_key = config.ballchasing_api_key
         self.base_url = "https://ballchasing.com/api"
-        self.rate_limiter = rate_limiter or RateLimiter(
-            requests_per_second=config.rate_limit_per_second,
-            requests_per_hour=config.rate_limit_per_hour
-        )
+        self.rate_limit_per_second = config.rate_limit_per_second
+        self.rate_limit_per_hour = config.rate_limit_per_hour
+
 
         # Create HTTP session with auth headers
-        self.session = requests.Session()
+        self.session = LimiterSession(per_second=self.rate_limit_per_second, per_hour=self.rate_limit_per_hour)
         self.session.headers.update({"Authorization": self.api_key})
 
     def get_group_info(self, group_id: str) -> Dict:
@@ -66,7 +64,6 @@ class BallchasingClient:
         API Documentation:
             https://ballchasing.com/doc/api#replay-groups-group-get
         """
-        self.rate_limiter.wait_if_needed()
         url = f"{self.base_url}/groups/{group_id}"
         response = self.session.get(url)
         response.raise_for_status()
@@ -95,7 +92,6 @@ class BallchasingClient:
         after = None
 
         while True:
-            self.rate_limiter.wait_if_needed()
 
             params = {'group': parent_group_id, 'count': count}
             if after:
@@ -141,8 +137,6 @@ class BallchasingClient:
         after = None
 
         while True:
-            self.rate_limiter.wait_if_needed()
-
             params = {'group': group_id, 'count': count}
             if after:
                 params['after'] = after
@@ -180,8 +174,6 @@ class BallchasingClient:
         API Documentation:
             https://ballchasing.com/doc/api#replays-replay-get-1
         """
-        self.rate_limiter.wait_if_needed()
-
         url = f"{self.base_url}/replays/{replay_id}/file"
         response = self.session.get(url)
         response.raise_for_status()
@@ -203,8 +195,6 @@ class BallchasingClient:
         API Documentation:
             https://ballchasing.com/doc/api#replays-replay-get
         """
-        self.rate_limiter.wait_if_needed()
-
         url = f"{self.base_url}/replays/{replay_id}"
         response = self.session.get(url)
         response.raise_for_status()
@@ -271,18 +261,3 @@ class BallchasingClient:
 
         time.sleep(0.5)  # Brief pause between groups
         return tree
-
-    def get_rate_limit_status(self) -> Dict:
-        """
-        Get current rate limiter status.
-
-        Returns:
-            Dict with rate limit information:
-            {
-                'requests_this_hour': int,
-                'requests_remaining': int,
-                'window_resets_in_seconds': float,
-                'window_resets_in_minutes': float
-            }
-        """
-        return self.rate_limiter.get_status()

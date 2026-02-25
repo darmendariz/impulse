@@ -69,7 +69,6 @@ from impulse.collection.storage import (
     S3Backend
 )
 from impulse.collection.database import ImpulseDB
-from impulse.collection.rate_limiter import RateLimiter
 from impulse.collection.rlcs_manager import RLCSManager
 from impulse.collection.utils import (
     load_group_tree,
@@ -179,7 +178,6 @@ __all__ = [
     'BallchasingClient',
     'ReplayDownloader',
     'ImpulseDB',
-    'RateLimiter',
     'RLCSManager',
 
     # Storage backends
