@@ -10,7 +10,7 @@ from typing import Dict, Optional, List, Callable
 from dataclasses import dataclass
 
 from impulse.collection.ballchasing_client import BallchasingClient
-from impulse.collection.storage import StorageBackend
+from impulse.collection.storage import StorageBackend, LocalBackend
 from impulse.collection.database import ImpulseDB
 from impulse.collection.utils import (
     flatten_group_tree,
@@ -72,7 +72,7 @@ class ReplayDownloader:
     def __init__(
         self,
         client: BallchasingClient,
-        storage: StorageBackend,
+        storage: StorageBackend = LocalBackend(),
         db: Optional[ImpulseDB] = None,
         progress_callback: Optional[Callable[[DownloadProgress], None]] = None
     ):
