@@ -39,20 +39,29 @@ class ImpulseDB:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Table 1: Groups - track Ballchasing groups we've synced
+            # Tracks Ballchasing group downloads
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS groups (
                     group_id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
-                    downloaded_at TEXT,
-                    replay_count INTEGER DEFAULT 0
+                    storage_path TEXT,
+                    include_root_in_path BOOLEAN DEFAULT 1,
+                    download_status TEXT DEFAULT 'pending',
+                    replay_count INTEGER DEFAULT 0,
+                    successful_count INTEGER DEFAULT 0,
+                    failed_count INTEGER DEFAULT 0,
+                    skipped_count INTEGER DEFAULT 0,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    CHECK (download_status IN ('pending', 'complete', 'partial', 'failed'))
                 )
             """)
 
-            # Table 2: Raw Replays - tracks downloaded .replay files
+            # Tracks downloaded raw .replay files
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS raw_replays (
                     replay_id TEXT PRIMARY KEY,
+                    group_id TEXT,
                     title TEXT,
                     date TEXT,
                     blue_team TEXT,
@@ -63,11 +72,12 @@ class ImpulseDB:
                     is_downloaded BOOLEAN DEFAULT 0,
                     download_status TEXT DEFAULT 'pending',
                     error_message TEXT,
+                    FOREIGN KEY (group_id) REFERENCES groups(group_id),
                     CHECK (download_status IN ('pending', 'downloaded', 'failed'))
                 )
             """)
 
-            # Table 3: Parsed Replays - tracks parsed replay data
+            # Tracks parsed replays and metadata
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS parsed_replays (
                     replay_id TEXT PRIMARY KEY,
@@ -97,15 +107,151 @@ class ImpulseDB:
                 ON raw_replays(download_status)
             """)
             cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_raw_replays_group
+                ON raw_replays(group_id)
+            """)
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_parsed_replays_status
                 ON parsed_replays(parse_status)
             """)
 
     # =========================================================================
+    # Group Methods
+    # =========================================================================
+
+    def register_group_start(
+        self,
+        group_id: str,
+        name: str,
+        replay_count: int,
+        storage_path: Optional[str] = None,
+        include_root_in_path: bool = True
+    ):
+        """
+        Register a group download as started (status='pending').
+
+        Called at the beginning of a download before the replay loop.
+        Stores the storage path so retries can reconstruct the original call.
+
+        Args:
+            group_id: Ballchasing group ID
+            name: Human-readable group name
+            replay_count: Total number of replays in the group
+            storage_path: Slash-joined path prefix used for storage (e.g. 'replays/rlcs/2024')
+            include_root_in_path: Whether root group name is included in storage path
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO groups (
+                    group_id, name, storage_path, include_root_in_path,
+                    download_status, replay_count, started_at
+                )
+                VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                ON CONFLICT(group_id) DO UPDATE SET
+                    name = excluded.name,
+                    storage_path = excluded.storage_path,
+                    include_root_in_path = excluded.include_root_in_path,
+                    download_status = 'pending',
+                    replay_count = excluded.replay_count,
+                    started_at = excluded.started_at,
+                    successful_count = 0,
+                    failed_count = 0,
+                    skipped_count = 0,
+                    completed_at = NULL
+            """, (
+                group_id, name, storage_path, include_root_in_path,
+                replay_count, datetime.now(timezone.utc).isoformat()
+            ))
+
+    def finalize_group_download(
+        self,
+        group_id: str,
+        successful: int,
+        failed: int,
+        skipped: int
+    ):
+        """
+        Update group record with final download counts and status.
+
+        Called after the download loop completes.
+        Status is set to:
+          - 'complete' if no replays failed
+          - 'partial'  if some succeeded and some failed
+          - 'failed'   if all replays failed (and at least one was attempted)
+
+        Args:
+            group_id: Ballchasing group ID
+            successful: Number of replays successfully downloaded
+            failed: Number of replays that failed
+            skipped: Number of replays skipped (already existed)
+        """
+        if failed == 0:
+            status = 'complete'
+        elif successful > 0 or skipped > 0:
+            status = 'partial'
+        else:
+            status = 'failed'
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE groups
+                SET download_status = ?,
+                    successful_count = ?,
+                    failed_count = ?,
+                    skipped_count = ?,
+                    completed_at = ?
+                WHERE group_id = ?
+            """, (
+                status, successful, failed, skipped,
+                datetime.now(timezone.utc).isoformat(), group_id
+            ))
+
+    def get_group_info(self, group_id: str) -> Optional[Dict]:
+        """
+        Get full group record, or None if the group is not in the database.
+
+        Returns a dict with all group fields including download_status,
+        storage_path, and result counts.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM groups WHERE group_id = ?", (group_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def is_group_downloaded(self, group_id: str) -> bool:
+        """Return True only if the group's download_status is 'complete'."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT download_status FROM groups WHERE group_id = ?", (group_id,)
+            )
+            row = cursor.fetchone()
+            return row is not None and row['download_status'] == 'complete'
+
+    def get_failed_replays_for_group(self, group_id: str) -> List[Dict]:
+        """Get all failed replay records belonging to a specific group."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT replay_id, title, error_message
+                FROM raw_replays
+                WHERE group_id = ? AND download_status = 'failed'
+            """, (group_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
     # Raw Replay Methods (Download Tracking)
     # =========================================================================
 
-    def add_replay(self, replay_id: str, ballchasing_metadata: Dict) -> bool:
+    def add_replay(
+        self,
+        replay_id: str,
+        ballchasing_metadata: Dict,
+        group_id: Optional[str] = None
+    ) -> bool:
         """
         Add a raw replay to the database.
 
@@ -122,10 +268,11 @@ class ImpulseDB:
             orange = ballchasing_metadata.get('orange', {})
 
             cursor.execute("""
-                INSERT INTO raw_replays (replay_id, title, date, blue_team, orange_team, is_downloaded)
-                VALUES (?, ?, ?, ?, ?, 0)
+                INSERT INTO raw_replays (replay_id, group_id, title, date, blue_team, orange_team, is_downloaded)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
             """, (
                 replay_id,
+                group_id,
                 ballchasing_metadata.get('replay_title', 'Unknown'),
                 ballchasing_metadata.get('date'),
                 blue.get('name', 'Unknown'),
@@ -133,18 +280,6 @@ class ImpulseDB:
             ))
 
             return True
-
-    def register_group_download(self, group_id: str, name: str, replay_count: int):
-        """Track that we've downloaded this group from Ballchasing."""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO groups (group_id, name, downloaded_at, replay_count)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(group_id) DO UPDATE SET
-                    downloaded_at = excluded.downloaded_at,
-                    replay_count = excluded.replay_count
-            """, (group_id, name, datetime.now(timezone.utc).isoformat(), replay_count))
 
     def is_replay_downloaded(self, replay_id: str) -> bool:
         """Check if raw replay has been downloaded already."""
@@ -182,11 +317,11 @@ class ImpulseDB:
             """, (error_message, replay_id))
 
     def get_failed_replays(self) -> List[Dict]:
-        """Get all raw replays that failed to download."""
+        """Get all raw replays that failed to download (across all groups)."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT replay_id, title, error_message
+                SELECT replay_id, group_id, title, error_message
                 FROM raw_replays
                 WHERE download_status = 'failed'
             """)
@@ -197,7 +332,7 @@ class ImpulseDB:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             query = """
-                SELECT replay_id, title, date, blue_team, orange_team,
+                SELECT replay_id, group_id, title, date, blue_team, orange_team,
                        storage_key, file_size_bytes, downloaded_at
                 FROM raw_replays
                 WHERE is_downloaded = 1

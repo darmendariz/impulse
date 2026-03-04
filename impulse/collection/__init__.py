@@ -60,7 +60,6 @@ result = downloader.download_group('rlcs-2024-abc123')
 from impulse.collection.ballchasing_client import BallchasingClient
 from impulse.collection.replay_downloader import (
     ReplayDownloader,
-    DownloadProgress,
     DownloadResult
 )
 from impulse.collection.storage import (
@@ -87,8 +86,7 @@ def download_group(
     path_prefix: Optional[List[str]] = None,
     use_database: bool = True,
     database_path: str = "./impulse.db",
-    config: Optional[CollectionConfig] = None,
-    progress_callback = None
+    config: Optional[CollectionConfig] = None
 ) -> DownloadResult:
     """
     Convenience function to download a Ballchasing group with minimal setup.
@@ -104,7 +102,6 @@ def download_group(
         use_database: Enable database tracking for deduplication (default: True)
         database_path: Path to SQLite database (default: './impulse.db')
         config: Optional CollectionConfig (defaults to loading from environment)
-        progress_callback: Optional callback function for progress updates
 
     Returns:
         DownloadResult with statistics
@@ -159,8 +156,7 @@ def download_group(
     downloader = ReplayDownloader(
         client=client,
         storage=storage,
-        db=db,
-        progress_callback=progress_callback
+        db=db
     )
 
     # Download group
@@ -186,7 +182,6 @@ __all__ = [
     'S3Backend',
 
     # Data classes
-    'DownloadProgress',
     'DownloadResult',
 
     # Tree cache utilities

@@ -6,7 +6,7 @@ Provides progress reporting and error handling.
 """
 
 import logging
-from typing import Dict, Optional, List, Callable
+from typing import Dict, Optional, List
 from dataclasses import dataclass
 
 from impulse.collection.ballchasing_client import BallchasingClient
@@ -23,18 +23,6 @@ from impulse.collection.utils import (
 )
 
 logger = logging.getLogger('impulse.collection')
-
-
-@dataclass
-class DownloadProgress:
-    """Progress information for download operations."""
-    current: int
-    total: int
-    replay_id: str
-    status: str  # 'downloading', 'uploading', 'complete', 'skipped', 'failed'
-    message: str
-    storage_key: Optional[str] = None
-    error: Optional[str] = None
 
 
 @dataclass
@@ -73,8 +61,7 @@ class ReplayDownloader:
         self,
         client: BallchasingClient,
         storage: StorageBackend = LocalBackend(),
-        db: Optional[ImpulseDB] = None,
-        progress_callback: Optional[Callable[[DownloadProgress], None]] = None
+        db: Optional[ImpulseDB] = None
     ):
         """
         Initialize replay downloader.
@@ -83,24 +70,10 @@ class ReplayDownloader:
             client: Ballchasing API client
             storage: Storage backend (S3, local, etc.)
             db: Optional database for tracking (enables deduplication and resume)
-            progress_callback: Optional callback for progress updates
         """
         self.client = client
         self.storage = storage
         self.db = db
-        self.progress_callback = progress_callback or self._default_progress_callback
-
-    def _default_progress_callback(self, progress: DownloadProgress):
-        """Default progress callback that logs to console."""
-        indent = "  "
-        print(f"[{progress.current}/{progress.total}] {progress.replay_id}")
-        print(f"{indent}{progress.message}")
-
-        if progress.storage_key:
-            print(f"{indent}Storage key: {progress.storage_key}")
-
-        if progress.error:
-            print(f"{indent}Error: {progress.error}")
 
     def download_group(
         self,
@@ -108,17 +81,19 @@ class ReplayDownloader:
         path_prefix: Optional[List[str]] = None,
         include_root_in_path: bool = True,
         use_cache: bool = True,
-        only_replay_ids: Optional[List[str]] = None
+        only_replay_ids: Optional[List[str]] = None,
+        force: bool = False
     ) -> DownloadResult:
         """
         Download all replays from a Ballchasing group to storage.
 
         This method:
-        1. Builds the group tree (or loads from cache)
-        2. Registers replays in database (if enabled)
-        3. Downloads each replay from Ballchasing
-        4. Saves to storage backend
-        5. Updates database with completion status
+        1. Checks if the group was already fully downloaded (unless force=True)
+        2. Builds the group tree (or loads from cache)
+        3. Registers group and replays in database (if enabled)
+        4. Downloads each replay from Ballchasing
+        5. Saves to storage backend
+        6. Updates database with completion status
 
         Args:
             group_id: Ballchasing group ID
@@ -127,7 +102,9 @@ class ReplayDownloader:
             use_cache: If True, load cached tree if available and save tree after building.
                        This saves API calls on retries. Default True.
             only_replay_ids: If provided, only download these specific replay IDs.
-                            Useful for retrying failed downloads.
+                            Used internally by retry_failed_downloads().
+            force: If True, re-download even if the group is marked as complete in the
+                   database. Default False.
 
         Returns:
             DownloadResult with statistics
@@ -141,70 +118,62 @@ class ReplayDownloader:
         """
         logger.info(f"Starting download for group: {group_id}")
 
-        # Try to load cached tree first
+        # Early exit: skip if already complete (only on full group downloads)
+        if self.db and not only_replay_ids and not force:
+            group_info = self.db.get_group_info(group_id)
+            if group_info and group_info['download_status'] == 'complete':
+                print(
+                    f"Group '{group_info['name']}' already fully downloaded "
+                    f"({group_info['successful_count']} replays, {group_info['completed_at']}). "
+                    f"Use force=True to re-download."
+                )
+                return DownloadResult(
+                    total_replays=group_info['replay_count'],
+                    successful=0,
+                    skipped=group_info['replay_count'],
+                    failed=0,
+                    total_bytes=0,
+                    storage_keys=[],
+                    failed_replays=[]
+                )
+
+        # Load or build group tree
         tree = None
         if use_cache:
             tree = load_group_tree(group_id)
-            if tree:
-                logger.info("Loaded group tree from cache")
-                print("Using cached group tree (no API calls needed)")
 
-        # Build group tree if not cached
         if tree is None:
-            logger.info("Building group tree...")
-
-            def tree_progress(message, depth):
-                indent = "  " * depth
-                print(f"{indent}{message}")
-
-            tree = self.client.build_group_tree(group_id, progress_callback=tree_progress)
-
-            # Save tree to cache for future retries
+            print(f"Building group tree for {group_id}...")
+            tree = self.client.build_group_tree(group_id)
             if use_cache:
-                cache_path = save_group_tree(tree, group_id)
-                logger.info(f"Group tree cached at: {cache_path}")
-                print(f"Group tree cached for future retries")
+                save_group_tree(tree, group_id)
 
         # Flatten to replay list
-        logger.info("Flattening tree structure...")
         replay_list = flatten_group_tree(tree)
         total_in_tree = len(replay_list)
-        logger.info(f"Found {total_in_tree} total replays in tree")
 
         # Filter to specific replay IDs if requested (for retries)
         if only_replay_ids:
             filter_set = set(only_replay_ids)
             replay_list = [(r, p) for r, p in replay_list if r['id'] in filter_set]
-            logger.info(f"Filtered to {len(replay_list)} replays for retry")
-            print(f"Retrying {len(replay_list)} specific replays")
 
         total_replays = len(replay_list)
 
         # Register group and replays in database (skip if filtering for retry)
         if self.db and not only_replay_ids:
-            self.db.register_group_download(tree['id'], tree['name'], total_in_tree)
+            storage_path = "/".join(path_prefix) if path_prefix else None
+            self.db.register_group_start(
+                tree['id'], tree['name'], total_in_tree,
+                storage_path=storage_path,
+                include_root_in_path=include_root_in_path
+            )
+            new_count = sum(
+                1 for replay, _ in replay_list
+                if self.db.add_replay(replay['id'], replay, group_id=tree['id'])
+            )
+            logger.info(f"Registered {new_count} new replays, {total_in_tree - new_count} already known")
 
-            logger.info("Registering replays in database...")
-            new_count = 0
-            existing_count = 0
-
-            for replay, _ in replay_list:
-                is_new = self.db.add_replay(replay['id'], replay)
-                if is_new:
-                    new_count += 1
-                else:
-                    existing_count += 1
-
-            print(f"  New replays: {new_count}")
-            print(f"  Already in database: {existing_count}")
-
-        # Download replays
-        logger.info("Downloading replays...")
-        print()
-        print("=" * 60)
-        print("DOWNLOADING REPLAYS")
-        print("=" * 60)
-        print()
+        print(f"Downloading {total_replays} replays...")
 
         successful = 0
         skipped = 0
@@ -212,106 +181,45 @@ class ReplayDownloader:
         total_bytes = 0
         storage_keys = []
         failed_replays = []
-
+        width = len(str(total_replays))
         root_name = tree.get('name', group_id)
 
         for i, (replay, group_path) in enumerate(replay_list, 1):
             replay_id = replay['id']
+            counter = f"[{i:{width}}/{total_replays}]"
 
-            # Build storage path components
-            if path_prefix:
-                components = path_prefix.copy()
-            else:
-                components = []
-
-            # Add group hierarchy to path
-            path_parts = build_path_components(
-                group_path,
-                root_name,
-                include_root=include_root_in_path
+            components = (path_prefix.copy() if path_prefix else []) + build_path_components(
+                group_path, root_name, include_root=include_root_in_path
             )
-            components.extend(path_parts)
-
-            # Get storage key for this replay
             storage_key = self.storage.get_storage_key(replay_id, components)
 
             # Check database first (resume capability)
             if self.db and self.db.is_replay_downloaded(replay_id):
-                self.progress_callback(DownloadProgress(
-                    current=i,
-                    total=total_replays,
-                    replay_id=replay_id,
-                    status='skipped',
-                    message='Already downloaded (database check)',
-                    storage_key=storage_key
-                ))
+                print(f"{counter} {replay_id}  skipped")
                 skipped += 1
-                print()
                 continue
 
-            # Check storage directly (double-check)
+            # Check storage directly (double-check / sync)
             if self.storage.replay_exists(replay_id, components):
                 size = self.storage.get_replay_size(replay_id, components)
-
-                # Update database if it was out of sync
                 if self.db:
                     self.db.mark_downloaded(replay_id, storage_key, size)
-
-                self.progress_callback(DownloadProgress(
-                    current=i,
-                    total=total_replays,
-                    replay_id=replay_id,
-                    status='skipped',
-                    message='Already in storage (direct check)',
-                    storage_key=storage_key
-                ))
+                print(f"{counter} {replay_id}  skipped")
                 skipped += 1
-                print()
                 continue
 
-            # Download and save replay
+            # Download and save
             try:
-                # Download from Ballchasing
-                self.progress_callback(DownloadProgress(
-                    current=i,
-                    total=total_replays,
-                    replay_id=replay_id,
-                    status='downloading',
-                    message='Downloading from Ballchasing...'
-                ))
-
                 replay_bytes = self.client.download_replay_bytes(replay_id)
                 file_size = len(replay_bytes)
-                file_size_mb = file_size / (1024 * 1024)
 
-                print(f"  Downloaded: {file_size_mb:.2f} MB")
-
-                # Prepare metadata
                 metadata = extract_replay_metadata(replay)
                 metadata['group_id'] = group_id
 
-                # Save to storage
-                self.progress_callback(DownloadProgress(
-                    current=i,
-                    total=total_replays,
-                    replay_id=replay_id,
-                    status='uploading',
-                    message='Saving to storage...'
-                ))
-
-                save_result = self.storage.save_replay(
-                    replay_id,
-                    replay_bytes,
-                    components,
-                    metadata
-                )
-
+                save_result = self.storage.save_replay(replay_id, replay_bytes, components, metadata)
                 if not save_result['success']:
                     raise Exception(save_result.get('error', 'Storage save failed'))
 
-                print(f"  Saved to storage")
-
-                # Update database
                 if self.db:
                     self.db.mark_downloaded(replay_id, storage_key, file_size)
 
@@ -319,78 +227,35 @@ class ReplayDownloader:
                 total_bytes += file_size
                 storage_keys.append(storage_key)
 
-                self.progress_callback(DownloadProgress(
-                    current=i,
-                    total=total_replays,
-                    replay_id=replay_id,
-                    status='complete',
-                    message='Complete',
-                    storage_key=storage_key
-                ))
+                mb = file_size / (1024 * 1024)
+                print(f"{counter} {replay_id}  {mb:.2f} MB")
 
-                # Rate limit status every 50 replays
                 if i % 50 == 0:
-                    status = self.client.get_rate_limit_status()
-                    print(f"\nRate Limit Status:")
-                    print(f"  Requests this hour: {status['requests_this_hour']}")
-                    print(f"  Window resets in: {status['window_resets_in_minutes']:.1f} minutes")
-                    print()
-
-                print()
+                    rl = self.client.get_rate_limit_status()
+                    print(f"  [rate limit] {rl['requests_this_hour']}/200 requests used, "
+                          f"resets in {rl['window_resets_in_minutes']:.0f} min")
 
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Failed to download {replay_id}: {error_msg}")
-
-                self.progress_callback(DownloadProgress(
-                    current=i,
-                    total=total_replays,
-                    replay_id=replay_id,
-                    status='failed',
-                    message='Failed',
-                    error=error_msg
-                ))
-
                 if self.db:
                     self.db.mark_replay_failed(replay_id, error_msg)
-
                 failed += 1
                 failed_replays.append({'replay_id': replay_id, 'error': error_msg})
-                print()
-                continue
+                print(f"{counter} {replay_id}  FAILED: {error_msg}")
+
+        # Finalize group status in database
+        if self.db and not only_replay_ids:
+            self.db.finalize_group_download(tree['id'], successful, failed, skipped)
 
         # Summary
-        print()
-        print("=" * 60)
-        print("DOWNLOAD SUMMARY")
-        print("=" * 60)
-        print(f"Total replays: {total_replays}")
-        print(f"Successfully downloaded: {successful}")
-        print(f"Skipped (already had): {skipped}")
-        print(f"Failed: {failed}")
-        print(f"Total size: {total_bytes / (1024**2):.2f} MB ({total_bytes / (1024**3):.2f} GB)")
+        total_mb = total_bytes / (1024 ** 2)
+        print(f"Done. Downloaded: {successful}  Skipped: {skipped}  Failed: {failed}  ({total_mb:.1f} MB)")
 
-        # Storage statistics
-        if path_prefix:
-            stats_prefix = path_prefix
-        else:
-            stats_prefix = [sanitize_path_component(root_name)]
-
+        stats_prefix = path_prefix if path_prefix else [sanitize_path_component(root_name)]
         storage_stats = self.storage.get_storage_stats(stats_prefix)
-        print()
-        print("STORAGE STATISTICS")
-        print("-" * 60)
-        print(f"Total objects in storage: {storage_stats.get('total_replays', 0)}")
-        print(f"Total storage: {storage_stats.get('total_gb', 0):.2f} GB")
-
-        # Database statistics
-        if self.db:
-            print()
-            print("DATABASE STATISTICS")
-            print("-" * 60)
-            db_stats = self.db.get_stats()
-            for key, value in db_stats.items():
-                print(f"{key}: {value}")
+        print(f"Storage: {storage_stats.get('total_replays', 0)} files, "
+              f"{storage_stats.get('total_gb', 0):.2f} GB total")
 
         return DownloadResult(
             total_replays=total_replays,
@@ -405,39 +270,71 @@ class ReplayDownloader:
     def retry_failed_downloads(
         self,
         group_id: str,
-        failed_replays: List[Dict],
         path_prefix: Optional[List[str]] = None,
-        include_root_in_path: bool = True
+        include_root_in_path: Optional[bool] = None
     ) -> DownloadResult:
         """
-        Retry downloading failed replays using the cached group tree.
+        Retry all failed replays for a group, using stored state from the database.
 
-        A convenience wrapper around download_group() that accepts the
-        failed_replays list from a previous DownloadResult.
+        Looks up failed replays directly from the database so this can be called
+        at any time after a partial download without needing to preserve the
+        original DownloadResult.
+
+        Path options (path_prefix, include_root_in_path) are loaded from the
+        database record written during the original download. Override them here
+        only if you intentionally want to store the retried replays in a different
+        location.
 
         Args:
-            group_id: Ballchasing group ID (must have a cached tree)
-            failed_replays: The failed_replays list from a previous DownloadResult
-                           (list of dicts with 'replay_id' key)
-            path_prefix: Optional prefix for storage paths
-            include_root_in_path: Whether to include root group name in storage path
+            group_id: Ballchasing group ID
+            path_prefix: Override the stored path prefix (list of path components).
+                         If None, the original path is restored from the database.
+            include_root_in_path: Override the stored include_root_in_path setting.
+                                  If None, the original setting is restored from the database.
 
         Returns:
             DownloadResult with statistics for the retry attempt
 
+        Raises:
+            ValueError: If no database is configured, or the group is not found.
+
         Example:
             >>> result = downloader.download_group('rlcs-2024-abc123')
-            >>> if result.failed_replays:
-            ...     retry_result = downloader.retry_failed_downloads(
-            ...         'rlcs-2024-abc123',
-            ...         result.failed_replays
-            ...     )
+            >>> # Later, in the same or a new session:
+            >>> retry_result = downloader.retry_failed_downloads('rlcs-2024-abc123')
         """
-        replay_ids = [r['replay_id'] for r in failed_replays]
+        if not self.db:
+            raise ValueError("A database is required to use retry_failed_downloads.")
+
+        group_info = self.db.get_group_info(group_id)
+        if not group_info:
+            raise ValueError(
+                f"Group '{group_id}' not found in database. "
+                "Run download_group() first."
+            )
+
+        failed = self.db.get_failed_replays_for_group(group_id)
+        if not failed:
+            print(f"No failed replays for group '{group_info['name']}'.")
+            return DownloadResult(
+                total_replays=0, successful=0, skipped=0, failed=0,
+                total_bytes=0, storage_keys=[], failed_replays=[]
+            )
+
+        failed_ids = [r['replay_id'] for r in failed]
+        print(f"Retrying {len(failed_ids)} failed replay(s) for group '{group_info['name']}'...")
+
+        # Restore original path settings from the database unless overridden
+        if path_prefix is None and group_info.get('storage_path'):
+            path_prefix = group_info['storage_path'].split('/')
+
+        if include_root_in_path is None:
+            include_root_in_path = bool(group_info.get('include_root_in_path', True))
+
         return self.download_group(
             group_id=group_id,
             path_prefix=path_prefix,
             include_root_in_path=include_root_in_path,
             use_cache=True,
-            only_replay_ids=replay_ids
+            only_replay_ids=failed_ids
         )
