@@ -38,8 +38,8 @@ DATABASE_PATH = './impulse.db'
 # Ballchasing API rate limits
 # Free tier:   1 req/sec, 200 req/hour
 # Donor tier:  up to 200 req/sec, no hourly cap (set RATE_LIMIT_PER_HOUR to None)
-RATE_LIMIT_PER_SECOND = 1
-RATE_LIMIT_PER_HOUR = 200       # Set to None to disable hourly cap (donor tier)
+RATE_LIMIT_PER_SECOND = 2
+RATE_LIMIT_PER_HOUR = None       # Set to None to disable hourly cap (donor tier)
 
 # Retry failed downloads after the main run.
 # MAX_RETRIES attempts are made; stops early if all failures are recovered.
