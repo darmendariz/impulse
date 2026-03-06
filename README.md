@@ -41,7 +41,6 @@ The library is designed to scale. With it, you can download and process tens of 
 git clone https://github.com/darmendariz/impulse.git
 cd impulse
 uv sync
-uv pip install -e .
 ```
 
 > **Note:** After running `uv sync`, you must activate the virtual environment with `source .venv/bin/activate` before running any scripts. Alternatively, you can run scripts directly with `.venv/bin/python scripts/script_name.py` without activating.

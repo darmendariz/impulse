@@ -82,7 +82,8 @@ class ReplayDownloader:
         include_root_in_path: bool = True,
         use_cache: bool = True,
         only_replay_ids: Optional[List[str]] = None,
-        force: bool = False
+        force: bool = False,
+        is_rlcs: bool = False
     ) -> DownloadResult:
         """
         Download all replays from a Ballchasing group to storage.
@@ -105,6 +106,8 @@ class ReplayDownloader:
                             Used internally by retry_failed_downloads().
             force: If True, re-download even if the group is marked as complete in the
                    database. Default False.
+            is_rlcs: If True, tag all replays as RLCS matches in the database. Set
+                     automatically when called from RLCSManager. Default False.
 
         Returns:
             DownloadResult with statistics
@@ -169,7 +172,7 @@ class ReplayDownloader:
             )
             new_count = sum(
                 1 for replay, _ in replay_list
-                if self.db.add_replay(replay['id'], replay, group_id=tree['id'])
+                if self.db.add_replay(replay['id'], replay, group_id=tree['id'], is_rlcs=is_rlcs)
             )
             logger.info(f"Registered {new_count} new replays, {total_in_tree - new_count} already known")
 
@@ -229,11 +232,6 @@ class ReplayDownloader:
 
                 mb = file_size / (1024 * 1024)
                 print(f"{counter} {replay_id}  {mb:.2f} MB")
-
-                if i % 50 == 0:
-                    rl = self.client.get_rate_limit_status()
-                    print(f"  [rate limit] {rl['requests_this_hour']}/200 requests used, "
-                          f"resets in {rl['window_resets_in_minutes']:.0f} min")
 
             except Exception as e:
                 error_msg = str(e)
@@ -331,10 +329,13 @@ class ReplayDownloader:
         if include_root_in_path is None:
             include_root_in_path = bool(group_info.get('include_root_in_path', True))
 
-        return self.download_group(
+        result = self.download_group(
             group_id=group_id,
             path_prefix=path_prefix,
             include_root_in_path=include_root_in_path,
             use_cache=True,
             only_replay_ids=failed_ids
         )
+
+        self.db.recompute_group_status(group_id)
+        return result

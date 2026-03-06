@@ -66,6 +66,12 @@ class ImpulseDB:
                     date TEXT,
                     blue_team TEXT,
                     orange_team TEXT,
+                    playlist_id TEXT,
+                    min_rank TEXT,
+                    min_rank_tier INTEGER,
+                    max_rank TEXT,
+                    max_rank_tier INTEGER,
+                    is_rlcs BOOLEAN DEFAULT 0,
                     storage_key TEXT,
                     file_size_bytes INTEGER,
                     downloaded_at TEXT,
@@ -92,6 +98,12 @@ class ImpulseDB:
                     parse_status TEXT DEFAULT 'pending',
                     error_message TEXT,
                     metadata TEXT,
+                    playlist_id TEXT,
+                    min_rank TEXT,
+                    min_rank_tier INTEGER,
+                    max_rank TEXT,
+                    max_rank_tier INTEGER,
+                    is_rlcs BOOLEAN DEFAULT 0,
                     FOREIGN KEY (raw_replay_id) REFERENCES raw_replays(replay_id),
                     CHECK (parse_status IN ('pending', 'parsed', 'failed'))
                 )
@@ -231,6 +243,37 @@ class ImpulseDB:
             row = cursor.fetchone()
             return row is not None and row['download_status'] == 'complete'
 
+    def recompute_group_status(self, group_id: str):
+        """
+        Recompute and update group status from current replay states.
+
+        Useful after retries to reflect the true final state of the group.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN download_status = 'downloaded' THEN 1 ELSE 0 END) as successful,
+                    SUM(CASE WHEN download_status = 'failed' THEN 1 ELSE 0 END) as failed
+                FROM raw_replays WHERE group_id = ?
+            """, (group_id,))
+            row = cursor.fetchone()
+            successful = row['successful'] or 0
+            failed = row['failed'] or 0
+
+            if failed == 0:
+                status = 'complete'
+            elif successful > 0:
+                status = 'partial'
+            else:
+                status = 'failed'
+
+            cursor.execute("""
+                UPDATE groups
+                SET download_status = ?, successful_count = ?, failed_count = ?
+                WHERE group_id = ?
+            """, (status, successful, failed, group_id))
+
     def get_failed_replays_for_group(self, group_id: str) -> List[Dict]:
         """Get all failed replay records belonging to a specific group."""
         with self.get_connection() as conn:
@@ -250,7 +293,8 @@ class ImpulseDB:
         self,
         replay_id: str,
         ballchasing_metadata: Dict,
-        group_id: Optional[str] = None
+        group_id: Optional[str] = None,
+        is_rlcs: bool = False
     ) -> bool:
         """
         Add a raw replay to the database.
@@ -267,16 +311,29 @@ class ImpulseDB:
             blue = ballchasing_metadata.get('blue', {})
             orange = ballchasing_metadata.get('orange', {})
 
+            min_rank_obj = ballchasing_metadata.get('min_rank') or {}
+            max_rank_obj = ballchasing_metadata.get('max_rank') or {}
+
             cursor.execute("""
-                INSERT INTO raw_replays (replay_id, group_id, title, date, blue_team, orange_team, is_downloaded)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO raw_replays (
+                    replay_id, group_id, title, date, blue_team, orange_team,
+                    playlist_id, min_rank, min_rank_tier, max_rank, max_rank_tier,
+                    is_rlcs, is_downloaded
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             """, (
                 replay_id,
                 group_id,
                 ballchasing_metadata.get('replay_title', 'Unknown'),
                 ballchasing_metadata.get('date'),
                 blue.get('name', 'Unknown'),
-                orange.get('name', 'Unknown')
+                orange.get('name', 'Unknown'),
+                ballchasing_metadata.get('playlist_id'),
+                min_rank_obj.get('name'),
+                min_rank_obj.get('tier'),
+                max_rank_obj.get('name'),
+                max_rank_obj.get('tier'),
+                int(is_rlcs)
             ))
 
             return True
@@ -380,13 +437,27 @@ class ImpulseDB:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
+            # Inherit match classification fields from the source raw replay
+            cursor.execute("""
+                SELECT playlist_id, min_rank, min_rank_tier, max_rank, max_rank_tier, is_rlcs
+                FROM raw_replays WHERE replay_id = ?
+            """, (raw_replay_id,))
+            raw = cursor.fetchone()
+            playlist_id = raw['playlist_id'] if raw else None
+            min_rank = raw['min_rank'] if raw else None
+            min_rank_tier = raw['min_rank_tier'] if raw else None
+            max_rank = raw['max_rank'] if raw else None
+            max_rank_tier = raw['max_rank_tier'] if raw else None
+            is_rlcs = raw['is_rlcs'] if raw else 0
+
             cursor.execute("""
                 INSERT INTO parsed_replays (
                     replay_id, raw_replay_id, output_path, output_format,
                     fps, frame_count, feature_count, file_size_bytes,
-                    parsed_at, parse_status, metadata
+                    parsed_at, parse_status, metadata,
+                    playlist_id, min_rank, min_rank_tier, max_rank, max_rank_tier, is_rlcs
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(replay_id) DO UPDATE SET
                     output_path = excluded.output_path,
                     output_format = excluded.output_format,
@@ -397,11 +468,18 @@ class ImpulseDB:
                     parsed_at = excluded.parsed_at,
                     parse_status = 'parsed',
                     error_message = NULL,
-                    metadata = excluded.metadata
+                    metadata = excluded.metadata,
+                    playlist_id = excluded.playlist_id,
+                    min_rank = excluded.min_rank,
+                    min_rank_tier = excluded.min_rank_tier,
+                    max_rank = excluded.max_rank,
+                    max_rank_tier = excluded.max_rank_tier,
+                    is_rlcs = excluded.is_rlcs
             """, (
                 replay_id, raw_replay_id, output_path, output_format,
                 fps, frame_count, feature_count, file_size_bytes,
-                datetime.now(timezone.utc).isoformat(), metadata
+                datetime.now(timezone.utc).isoformat(), metadata,
+                playlist_id, min_rank, min_rank_tier, max_rank, max_rank_tier, is_rlcs
             ))
 
             return cursor.rowcount > 0

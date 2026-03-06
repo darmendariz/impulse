@@ -251,7 +251,8 @@ class RLCSManager:
                     group_id=season['group_id'],
                     storage_type='local',
                     output_dir=out_dir,
-                    use_database=self.use_database
+                    use_database=self.use_database,
+                    is_rlcs=True
                 )
             else:  # s3
                 path_prefix = self.path_prefix + [season_key]
@@ -259,7 +260,8 @@ class RLCSManager:
                     group_id=season['group_id'],
                     storage_type='s3',
                     path_prefix=path_prefix,
-                    use_database=self.use_database
+                    use_database=self.use_database,
+                    is_rlcs=True
                 )
 
             # Log completion

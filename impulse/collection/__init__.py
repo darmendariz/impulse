@@ -86,7 +86,8 @@ def download_group(
     path_prefix: Optional[List[str]] = None,
     use_database: bool = True,
     database_path: str = "./impulse.db",
-    config: Optional[CollectionConfig] = None
+    config: Optional[CollectionConfig] = None,
+    is_rlcs: bool = False
 ) -> DownloadResult:
     """
     Convenience function to download a Ballchasing group with minimal setup.
@@ -102,6 +103,7 @@ def download_group(
         use_database: Enable database tracking for deduplication (default: True)
         database_path: Path to SQLite database (default: './impulse.db')
         config: Optional CollectionConfig (defaults to loading from environment)
+        is_rlcs: Tag all replays in this group as RLCS matches (default: False)
 
     Returns:
         DownloadResult with statistics
@@ -162,7 +164,8 @@ def download_group(
     # Download group
     return downloader.download_group(
         group_id=group_id,
-        path_prefix=path_prefix
+        path_prefix=path_prefix,
+        is_rlcs=is_rlcs
     )
 
 
