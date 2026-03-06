@@ -73,7 +73,8 @@ downloader = ReplayDownloader(client, storage, db)
 
 result = downloader.download_group(
     group_id=season_info['group_id'],
-    path_prefix=PATH_PREFIX + [SEASON]
+    path_prefix=PATH_PREFIX + [SEASON],
+    is_rlcs=True
 )
 
 if AUTO_RETRY and result.failed > 0:
