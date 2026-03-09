@@ -45,7 +45,6 @@ from impulse.parsing.replay_parser import ReplayParser, ParseResult
 from impulse.parsing.parse_result_formatter import ParseResultFormatter, FormatResult
 from impulse.parsing.parsing_pipeline import (
     ParsingPipeline,
-    PipelineProgress,
     PipelineResult
 )
 
@@ -60,6 +59,5 @@ __all__ = [
 
     # Pipeline orchestrator
     'ParsingPipeline',
-    'PipelineProgress',
     'PipelineResult',
 ]

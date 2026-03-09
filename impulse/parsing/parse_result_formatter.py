@@ -41,6 +41,7 @@ class FormatResult:
     has_inf: bool = False
     nan_count: int = 0
     inf_count: int = 0
+    skipped: bool = False
     error: Optional[str] = None
 
 

@@ -11,7 +11,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Callable
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from impulse.parsing.replay_parser import ReplayParser, ParseResult
 from impulse.parsing.parse_result_formatter import ParseResultFormatter, FormatResult
@@ -23,18 +23,6 @@ if TYPE_CHECKING:
     from impulse.collection.s3_manager import S3Manager
 
 logger = logging.getLogger('impulse.parsing')
-
-
-@dataclass
-class PipelineProgress:
-    """Progress information for parsing operations."""
-    current: int
-    total: int
-    replay_id: str
-    status: str  # 'parsing', 'formatting', 'saving', 'complete', 'skipped', 'failed'
-    message: str
-    output_path: Optional[str] = None
-    error: Optional[str] = None
 
 
 @dataclass
@@ -84,7 +72,6 @@ class ParsingPipeline:
         parser: ReplayParser,
         db: Optional[ImpulseDB] = None,
         formatter: Optional[ParseResultFormatter] = None,
-        progress_callback: Optional[Callable[[PipelineProgress], None]] = None,
         s3_manager: Optional["S3Manager"] = None
     ):
         """
@@ -94,27 +81,13 @@ class ParsingPipeline:
             parser: ReplayParser instance configured with features and FPS
             db: Optional database for tracking (enables deduplication and registration)
             formatter: Optional ParseResultFormatter (uses default if not provided)
-            progress_callback: Optional callback for progress updates
             s3_manager: Optional S3Manager for downloading raw replays from S3 and
                         uploading parsed output (parquet + metadata JSON) back to S3
         """
         self.parser = parser
         self.db = db
         self.formatter = formatter or ParseResultFormatter()
-        self.progress_callback = progress_callback or self._default_progress_callback
         self.s3_manager = s3_manager
-
-    def _default_progress_callback(self, progress: PipelineProgress):
-        """Default progress callback that logs to console."""
-        indent = "  "
-        print(f"[{progress.current}/{progress.total}] {progress.replay_id}")
-        print(f"{indent}{progress.message}")
-
-        if progress.output_path:
-            print(f"{indent}Output: {progress.output_path}")
-
-        if progress.error:
-            print(f"{indent}Error: {progress.error}")
 
     @contextmanager
     def _temp_replay_from_s3(self, storage_key: str, replay_id: str):
@@ -211,7 +184,7 @@ class ParsingPipeline:
                              to S3 mirroring the raw key's path structure.
 
         Returns:
-            FormatResult with parsing outcome
+            FormatResult with parsing outcome. result.skipped=True if already parsed.
         """
         replay_path = Path(replay_path)
         replay_id = replay_path.stem
@@ -221,13 +194,13 @@ class ParsingPipeline:
             logger.info(f"Skipping {replay_id}: already parsed")
             return FormatResult(
                 success=True,
+                skipped=True,
                 replay_id=replay_id,
                 dataframe=None,
                 metadata=None,
                 num_rows=0,
                 num_columns=0,
                 num_players=0,
-                error="Already parsed (skipped)"
             )
 
         # Parse
@@ -314,144 +287,45 @@ class ParsingPipeline:
             PipelineResult with statistics
         """
         total = len(replay_paths)
-        successful = 0
-        skipped = 0
-        failed = 0
-        total_frames = 0
-        total_bytes = 0
+        successful = skipped = failed = 0
+        total_frames = total_bytes = 0
         output_paths = []
         failed_replays = []
+        width = len(str(total))
 
-        print()
-        print("=" * 60)
-        print("PARSING REPLAYS")
-        print("=" * 60)
-        print()
+        print(f"Parsing {total} replays...")
 
         for i, replay_path in enumerate(replay_paths, 1):
-            replay_path = Path(replay_path)
-            replay_id = replay_path.stem
-
-            # Check if already parsed
-            if self.db and self.db.is_replay_parsed(replay_id):
-                self.progress_callback(PipelineProgress(
-                    current=i,
-                    total=total,
-                    replay_id=replay_id,
-                    status='skipped',
-                    message='Already parsed (database check)'
-                ))
-                skipped += 1
-                print()
-                continue
+            replay_id = Path(replay_path).stem
+            counter = f"[{i:{width}}/{total}]"
 
             try:
-                # Parse
-                self.progress_callback(PipelineProgress(
-                    current=i,
-                    total=total,
-                    replay_id=replay_id,
-                    status='parsing',
-                    message='Parsing replay...'
-                ))
-
-                parse_result = self.parser.parse_file(str(replay_path))
-
-                if not parse_result.success:
-                    raise Exception(parse_result.error)
-
-                # Format
-                self.progress_callback(PipelineProgress(
-                    current=i,
-                    total=total,
-                    replay_id=replay_id,
-                    status='formatting',
-                    message='Formatting data...'
-                ))
-
-                format_result = self.formatter.format(parse_result)
-
-                if not format_result.success:
-                    raise Exception(format_result.error)
-
-                # Save
-                self.progress_callback(PipelineProgress(
-                    current=i,
-                    total=total,
-                    replay_id=replay_id,
-                    status='saving',
-                    message='Saving to parquet...'
-                ))
-
-                format_result = self.formatter.save_to_parquet(
-                    format_result, output_dir, compression
-                )
-
-                if not format_result.success:
-                    raise Exception(format_result.error)
-
-                # Upload to S3 if configured (flat key structure since no raw_storage_key)
-                output_path = format_result.parquet_path
-                if self.s3_manager:
-                    self.progress_callback(PipelineProgress(
-                        current=i,
-                        total=total,
-                        replay_id=replay_id,
-                        status='saving',
-                        message='Uploading to S3...'
-                    ))
-                    s3_keys = self._upload_to_s3(format_result)
-                    output_path = s3_keys['parquet_key']
-
-                # Register in database
-                if self.db:
-                    metadata_json = json.dumps(format_result.metadata) if format_result.metadata else None
-                    self.db.add_parsed_replay(
-                        replay_id=replay_id,
-                        raw_replay_id=replay_id,
-                        output_path=output_path,
-                        output_format='parquet',
-                        fps=self.parser.fps,
-                        frame_count=format_result.num_rows,
-                        feature_count=format_result.num_columns,
-                        file_size_bytes=format_result.parquet_size_bytes,
-                        metadata=metadata_json
-                    )
-
-                successful += 1
-                total_frames += format_result.num_rows
-                total_bytes += format_result.parquet_size_bytes
-                output_paths.append(output_path)
-
-                self.progress_callback(PipelineProgress(
-                    current=i,
-                    total=total,
-                    replay_id=replay_id,
-                    status='complete',
-                    message=f'Complete ({format_result.num_rows} frames)',
-                    output_path=output_path
-                ))
-                print()
-
+                format_result = self.parse_replay(replay_path, output_dir, compression)
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Failed to parse {replay_id}: {error_msg}")
-
-                self.progress_callback(PipelineProgress(
-                    current=i,
-                    total=total,
-                    replay_id=replay_id,
-                    status='failed',
-                    message='Failed',
-                    error=error_msg
-                ))
-
                 if self.db:
                     self.db.mark_parse_failed(replay_id, replay_id, error_msg)
-
                 failed += 1
                 failed_replays.append({'replay_id': replay_id, 'error': error_msg})
-                print()
+                print(f"{counter} {replay_id}  FAILED: {error_msg}")
+                continue
+
+            if format_result.skipped:
+                skipped += 1
+                print(f"{counter} {replay_id}  skipped")
+            elif not format_result.success:
+                failed += 1
+                failed_replays.append({'replay_id': replay_id, 'error': format_result.error})
+                print(f"{counter} {replay_id}  FAILED: {format_result.error}")
+            else:
+                successful += 1
+                total_frames += format_result.num_rows
+                total_bytes += format_result.parquet_size_bytes
+                output_path = format_result.parquet_path or ''
+                output_paths.append(output_path)
+                mb = format_result.parquet_size_bytes / (1024 * 1024)
+                print(f"{counter} {replay_id}  {format_result.num_rows} frames  {mb:.2f} MB")
 
         return self._finish_batch(
             total, successful, skipped, failed,
@@ -561,7 +435,7 @@ class ParsingPipeline:
                 total_frames=0, total_bytes=0, output_paths=[], failed_replays=[]
             )
 
-        print(f"Found {len(failed)} failed parses to retry")
+        print(f"Retrying {len(failed)} failed parse(s)...")
 
         if self.s3_manager:
             return self._parse_from_s3(failed, output_dir, compression)
@@ -603,35 +477,24 @@ class ParsingPipeline:
         total_frames = total_bytes = 0
         output_paths = []
         failed_replays = []
+        width = len(str(total))
 
-        print()
-        print("=" * 60)
-        print("PARSING REPLAYS (S3)")
-        print("=" * 60)
-        print()
+        print(f"Parsing {total} replays from S3...")
 
         for i, replay_info in enumerate(replay_infos, 1):
             replay_id = replay_info['replay_id']
             storage_key = replay_info.get('storage_key')
+            counter = f"[{i:{width}}/{total}]"
 
             if not storage_key:
                 error_msg = "No storage_key recorded in database"
                 logger.warning(f"Skipping {replay_id}: {error_msg}")
-                self.progress_callback(PipelineProgress(
-                    current=i, total=total, replay_id=replay_id,
-                    status='failed', message='Failed', error=error_msg
-                ))
                 if self.db:
                     self.db.mark_parse_failed(replay_id, replay_id, error_msg)
                 failed += 1
                 failed_replays.append({'replay_id': replay_id, 'error': error_msg})
-                print()
+                print(f"{counter} {replay_id}  FAILED: {error_msg}")
                 continue
-
-            self.progress_callback(PipelineProgress(
-                current=i, total=total, replay_id=replay_id,
-                status='parsing', message='Downloading from S3 and parsing...'
-            ))
 
             try:
                 with self._temp_replay_from_s3(storage_key, replay_id) as tmp_path:
@@ -645,41 +508,29 @@ class ParsingPipeline:
                 # Download failure (parse_replay was never called)
                 error_msg = str(e)
                 logger.error(f"Failed to download {replay_id}: {error_msg}")
-                self.progress_callback(PipelineProgress(
-                    current=i, total=total, replay_id=replay_id,
-                    status='failed', message='Failed', error=error_msg
-                ))
                 if self.db:
                     self.db.mark_parse_failed(replay_id, replay_id, error_msg)
                 failed += 1
                 failed_replays.append({'replay_id': replay_id, 'error': error_msg})
-                print()
+                print(f"{counter} {replay_id}  FAILED: {error_msg}")
                 continue
 
             # parse_replay() returns a FormatResult for all outcomes (no exceptions)
-            if not format_result.success:
+            if format_result.skipped:
+                skipped += 1
+                print(f"{counter} {replay_id}  skipped")
+            elif not format_result.success:
                 # DB already marked as failed inside parse_replay()
-                self.progress_callback(PipelineProgress(
-                    current=i, total=total, replay_id=replay_id,
-                    status='failed', message='Failed', error=format_result.error
-                ))
                 failed += 1
                 failed_replays.append({'replay_id': replay_id, 'error': format_result.error})
-                print()
-                continue
-
-            successful += 1
-            total_frames += format_result.num_rows
-            total_bytes += format_result.parquet_size_bytes
-            output_paths.append(format_result.parquet_path or '')
-
-            self.progress_callback(PipelineProgress(
-                current=i, total=total, replay_id=replay_id,
-                status='complete',
-                message=f'Complete ({format_result.num_rows} frames)',
-                output_path=format_result.parquet_path
-            ))
-            print()
+                print(f"{counter} {replay_id}  FAILED: {format_result.error}")
+            else:
+                successful += 1
+                total_frames += format_result.num_rows
+                total_bytes += format_result.parquet_size_bytes
+                output_paths.append(format_result.parquet_path or '')
+                mb = format_result.parquet_size_bytes / (1024 * 1024)
+                print(f"{counter} {replay_id}  {format_result.num_rows} frames  {mb:.2f} MB")
 
         return self._finish_batch(
             total, successful, skipped, failed,
@@ -748,24 +599,15 @@ class ParsingPipeline:
         failed_replays: List[Dict]
     ) -> PipelineResult:
         """Print batch summary, push DB to S3 if configured, and return PipelineResult."""
-        print()
-        print("=" * 60)
-        print("PARSING SUMMARY")
-        print("=" * 60)
-        print(f"Total replays: {total}")
-        print(f"Successfully parsed: {successful}")
-        print(f"Skipped (already parsed): {skipped}")
-        print(f"Failed: {failed}")
-        print(f"Total frames: {total_frames:,}")
-        print(f"Total output size: {total_bytes / (1024**2):.2f} MB")
+        total_mb = total_bytes / (1024 ** 2)
+        print(f"Done. Parsed: {successful}  Skipped: {skipped}  Failed: {failed}  "
+              f"({total_frames:,} frames, {total_mb:.1f} MB)")
 
         if self.db:
-            print()
-            print("DATABASE STATISTICS")
-            print("-" * 60)
             stats = self.db.get_parse_stats()
-            for key, value in stats.items():
-                print(f"{key}: {value}")
+            print(f"DB totals — parsed: {stats.get('parsed', 0)}  "
+                  f"failed: {stats.get('failed', 0)}  "
+                  f"pending: {stats.get('pending', 0)}")
 
             if self.db.s3_manager:
                 try:
