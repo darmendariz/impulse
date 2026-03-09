@@ -310,6 +310,31 @@ class ParseResultFormatter:
                 error=f"Save failed: {str(e)}"
             )
     
+    def _classify_column(self, raw_col: str) -> str:
+        """
+        Classify a raw column name (from VALID_FEATURE_ADDERS) by semantic type.
+
+        Strips known entity prefixes ('Ball - ', 'i ') before matching, so the
+        same classification applies to global and player features alike.
+
+        Returns one of: 'position', 'euler_rotation', 'quaternion', 'velocity', 'other'
+        """
+        name = raw_col
+        for prefix in ('Ball - ', 'i '):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+
+        if 'quaternion' in name:
+            return 'quaternion'
+        if 'velocity' in name:
+            return 'velocity'
+        if name in ('position x', 'position y', 'position z'):
+            return 'position'
+        if name in ('rotation x', 'rotation y', 'rotation z'):
+            return 'euler_rotation'
+        return 'other'
+
     def _deduplicate_features(self,
                              array: np.ndarray,
                              global_features: List[str],
@@ -317,19 +342,16 @@ class ParseResultFormatter:
                              num_players: int,
                              config: PipelineConfig = PipelineConfig()) -> Tuple[np.ndarray, List[str]]:
         """
-        Deduplicate redundant features from RigidBody and RigidBodyQuaternions.
+        Filter and deduplicate columns from the parsed ndarray.
 
-        Uses PipelineConfig settings to determine which columns to keep:
-        - KEEP_QUATERNIONS: Keep quaternion columns from RigidBodyQuaternions
-        - KEEP_EULER_ANGLES: Keep Euler angle columns from RigidBody
-        - KEEP_VELOCITIES: Keep velocity columns from RigidBody
-        - DEDUPLICATE_POSITION: Skip redundant position columns
+        For each feature's columns (looked up from VALID_FEATURE_ADDERS):
+        - Skips columns whose full name has already been output (handles position
+          overlap between e.g. BallRigidBody and BallRigidBodyQuaternions)
+        - Applies config-based type filters (KEEP_EULER_ANGLES, KEEP_QUATERNIONS,
+          KEEP_VELOCITIES) using semantic column classification
+        - Always advances the ndarray index, whether or not the column is included
 
-        Strategy for 'standard' preset (RigidBody + RigidBodyQuaternions):
-        - Position (x, y, z): Taken from first occurrence (RigidBody)
-        - Euler angles: Kept only if KEEP_EULER_ANGLES=True
-        - Quaternions: Kept only if KEEP_QUATERNIONS=True (default)
-        - Velocities: Always kept from RigidBody
+        Works for any combination of feature adders, not just the standard preset.
 
         Args:
             array: Raw ndarray from parser
@@ -339,120 +361,38 @@ class ParseResultFormatter:
             config: Pipeline configuration
 
         Returns:
-            Tuple of (deduplicated_array, column_names)
+            Tuple of (filtered_array, column_names)
         """
         output_columns = []
         output_data = []
+        seen_columns: set = set()
         ndarray_idx = 0
 
-        # Check if we have both RigidBody and RigidBodyQuaternions for globals
-        has_ball_rigid_body = 'BallRigidBody' in global_features
-        has_ball_quaternions = 'BallRigidBodyQuaternions' in global_features
-
-        # Process global features
-        for feature in global_features:
-            feature_cols = VALID_FEATURE_ADDERS['global'][feature]
-
-            if feature == 'BallRigidBody':
-                # BallRigidBody columns: pos(3), rot(3), lin_vel(3), ang_vel(3) = 12 total
-                for i, col in enumerate(feature_cols):
-                    # Position: indices 0-2
-                    if i < 3:
-                        output_columns.append(col)
-                        output_data.append(array[:, ndarray_idx])
-                        ndarray_idx += 1
-                    # Euler angles: indices 3-5
-                    elif i < 6:
-                        # Keep Euler angles only if configured AND quaternions not preferred
-                        if config.KEEP_EULER_ANGLES and not (has_ball_quaternions and config.KEEP_QUATERNIONS):
-                            output_columns.append(col)
-                            output_data.append(array[:, ndarray_idx])
-                        ndarray_idx += 1
-                    # Velocities: indices 6-11
-                    else:
-                        if config.KEEP_VELOCITIES:
-                            output_columns.append(col)
-                            output_data.append(array[:, ndarray_idx])
-                        ndarray_idx += 1
-
-            elif feature == 'BallRigidBodyQuaternions':
-                # BallRigidBodyQuaternions columns: pos(3), quat(4) = 7 total
-                for i, col in enumerate(feature_cols):
-                    # Position: indices 0-2 (skip if deduplicating)
-                    if i < 3:
-                        if not (has_ball_rigid_body and config.DEDUPLICATE_POSITION):
-                            output_columns.append(col)
-                            output_data.append(array[:, ndarray_idx])
-                        ndarray_idx += 1
-                    # Quaternions: indices 3-6
-                    else:
-                        if config.KEEP_QUATERNIONS:
-                            output_columns.append(col)
-                            output_data.append(array[:, ndarray_idx])
-                        ndarray_idx += 1
-
-            else:
-                # Other features: take as-is
-                for col in feature_cols:
-                    output_columns.append(col)
+        def process_feature(raw_cols: List[str], prefix: str = '') -> None:
+            nonlocal ndarray_idx
+            for raw_col in raw_cols:
+                full_col = f"{prefix}{raw_col}" if prefix else raw_col
+                col_type = self._classify_column(raw_col)
+                include = (
+                    full_col not in seen_columns
+                    and (col_type != 'velocity' or config.KEEP_VELOCITIES)
+                    and (col_type != 'euler_rotation' or config.KEEP_EULER_ANGLES)
+                    and (col_type != 'quaternion' or config.KEEP_QUATERNIONS)
+                )
+                if include:
+                    output_columns.append(full_col)
                     output_data.append(array[:, ndarray_idx])
-                    ndarray_idx += 1
+                    seen_columns.add(full_col)
+                ndarray_idx += 1
 
-        # Check if we have both RigidBody and RigidBodyQuaternions for players
-        has_player_rigid_body = 'PlayerRigidBody' in player_features
-        has_player_quaternions = 'PlayerRigidBodyQuaternions' in player_features
+        for feature in global_features:
+            process_feature(VALID_FEATURE_ADDERS['global'][feature])
 
-        # Process player features
         for player_idx in range(num_players):
             for feature in player_features:
-                feature_cols = VALID_FEATURE_ADDERS['player'][feature]
+                process_feature(VALID_FEATURE_ADDERS['player'][feature], prefix=f'p{player_idx}_')
 
-                if feature == 'PlayerRigidBody':
-                    # Same structure as BallRigidBody
-                    for i, col in enumerate(feature_cols):
-                        # Position: indices 0-2
-                        if i < 3:
-                            output_columns.append(f"p{player_idx}_{col}")
-                            output_data.append(array[:, ndarray_idx])
-                            ndarray_idx += 1
-                        # Euler angles: indices 3-5
-                        elif i < 6:
-                            if config.KEEP_EULER_ANGLES and not (has_player_quaternions and config.KEEP_QUATERNIONS):
-                                output_columns.append(f"p{player_idx}_{col}")
-                                output_data.append(array[:, ndarray_idx])
-                            ndarray_idx += 1
-                        # Velocities: indices 6-11
-                        else:
-                            if config.KEEP_VELOCITIES:
-                                output_columns.append(f"p{player_idx}_{col}")
-                                output_data.append(array[:, ndarray_idx])
-                            ndarray_idx += 1
-
-                elif feature == 'PlayerRigidBodyQuaternions':
-                    # Same structure as BallRigidBodyQuaternions
-                    for i, col in enumerate(feature_cols):
-                        # Position: indices 0-2
-                        if i < 3:
-                            if not (has_player_rigid_body and config.DEDUPLICATE_POSITION):
-                                output_columns.append(f"p{player_idx}_{col}")
-                                output_data.append(array[:, ndarray_idx])
-                            ndarray_idx += 1
-                        # Quaternions: indices 3-6
-                        else:
-                            if config.KEEP_QUATERNIONS:
-                                output_columns.append(f"p{player_idx}_{col}")
-                                output_data.append(array[:, ndarray_idx])
-                            ndarray_idx += 1
-
-                else:
-                    # Other features: take as-is
-                    for col in feature_cols:
-                        output_columns.append(f"p{player_idx}_{col}")
-                        output_data.append(array[:, ndarray_idx])
-                        ndarray_idx += 1
-
-        deduplicated_array = np.column_stack(output_data)
-        return deduplicated_array, output_columns
+        return np.column_stack(output_data), output_columns
 
     def _pad_to_max_players(self,
                            array: np.ndarray,

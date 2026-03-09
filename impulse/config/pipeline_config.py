@@ -27,11 +27,6 @@ class PipelineConfig:
     MAX_PLAYERS: int = 8  # Maximum players allowed in a replay for validation
 
     # Feature deduplication strategy for rigid body physics
-    DEDUPLICATE_POSITION: bool = True
     KEEP_QUATERNIONS: bool = True
-    KEEP_EULER_ANGLES: bool = False  
+    KEEP_EULER_ANGLES: bool = False
     KEEP_VELOCITIES: bool = True
-
-    # Retry logic
-    MAX_RETRIES: int = 3
-    RETRY_DELAY_SECONDS: int = 60
