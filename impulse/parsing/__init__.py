@@ -33,8 +33,11 @@ pipeline = ParsingPipeline(parser, db)
 # Parse a single replay
 result = pipeline.parse_replay('./replay.replay', './output')
 
-# Parse all unparsed replays
-result = pipeline.parse_unparsed('./raw_replays', './output')
+# Parse all unparsed replays (local)
+result = pipeline.parse_unparsed('./output', raw_replays_dir='./raw_replays')
+
+# Parse all unparsed replays from S3 (when pipeline has s3_manager configured)
+result = pipeline.parse_unparsed('./output')
 ```
 """
 

@@ -578,13 +578,14 @@ class ImpulseDB:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_failed_parses(self) -> List[Dict]:
-        """Get all replays that failed to parse."""
+        """Get all replays that failed to parse, including storage_key for S3 access."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT replay_id, raw_replay_id, error_message
-                FROM parsed_replays
-                WHERE parse_status = 'failed'
+                SELECT p.replay_id, p.raw_replay_id, p.error_message, r.storage_key
+                FROM parsed_replays p
+                LEFT JOIN raw_replays r ON p.raw_replay_id = r.replay_id
+                WHERE p.parse_status = 'failed'
             """)
             return [dict(row) for row in cursor.fetchall()]
 
