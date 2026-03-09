@@ -302,3 +302,16 @@ class S3Backend(StorageBackend):
             Dict with backup info
         """
         return self.s3_manager.backup_database(db_path, backup_prefix)
+
+    def restore_database(self, local_path: str, backup_prefix: str = "database-backups") -> bool:
+        """
+        Convenience method to restore the latest database backup from S3.
+
+        Args:
+            local_path: Where to write the restored database file
+            backup_prefix: S3 prefix where backups are stored
+
+        Returns:
+            True if successful, False otherwise
+        """
+        return self.s3_manager.restore_database(local_path, backup_prefix)

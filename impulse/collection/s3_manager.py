@@ -301,6 +301,33 @@ class S3Manager:
         
         return result
     
+    def restore_database(self, local_path: str, s3_prefix: str = "database-backups") -> bool:
+        """
+        Restore the latest database backup from S3.
+
+        Backups are stored with timestamps in their key names, so lexicographic
+        sort gives chronological order and the last entry is the most recent.
+
+        Args:
+            local_path: Where to write the restored database file
+            s3_prefix: S3 prefix where backups are stored
+
+        Returns:
+            True if successful, False otherwise
+        """
+        keys = self.list_objects(prefix=s3_prefix)
+        if not keys:
+            print(f"✗ No database backups found at s3://{self.s3_bucket_name}/{s3_prefix}/")
+            return False
+
+        latest_key = sorted(keys)[-1]
+        success = self.download_file(latest_key, local_path)
+        if success:
+            print(f"✓ Database restored from s3://{self.s3_bucket_name}/{latest_key}")
+        else:
+            print(f"✗ Database restore failed")
+        return success
+
     def get_storage_stats(self, prefix: str = "") -> Dict:
         """
         Get storage statistics for objects with given prefix.

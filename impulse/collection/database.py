@@ -7,15 +7,19 @@ Tracks both raw replay downloads and parsed replay data in a single database.
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 from contextlib import contextmanager
+
+if TYPE_CHECKING:
+    from impulse.collection.s3_manager import S3Manager
 
 
 class ImpulseDB:
     """Manages SQLite database for replay tracking (raw and parsed)."""
 
-    def __init__(self, db_path: str = "./impulse.db"):
+    def __init__(self, db_path: str = "./impulse.db", s3_manager: "Optional[S3Manager]" = None):
         self.db_path = Path(db_path)
+        self.s3_manager = s3_manager
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_database()
         print(f"Database initialized: {self.db_path}")
@@ -613,3 +617,42 @@ class ImpulseDB:
             'raw': self.get_stats(),
             'parsed': self.get_parse_stats()
         }
+
+    # =========================================================================
+    # S3 Sync
+    # =========================================================================
+
+    def push(self, s3_prefix: str = "database-backups") -> Dict:
+        """
+        Back up the local database to S3.
+
+        Creates a timestamped copy under s3_prefix so previous backups are
+        preserved. Requires s3_manager to be set on this instance.
+
+        Args:
+            s3_prefix: S3 prefix for backups (default: "database-backups")
+
+        Returns:
+            Dict with backup info (s3_key, size_bytes, success, ...)
+        """
+        if self.s3_manager is None:
+            raise RuntimeError("push() requires an s3_manager. Pass one to ImpulseDB().")
+        return self.s3_manager.backup_database(str(self.db_path), s3_prefix)
+
+    def pull(self, s3_prefix: str = "database-backups") -> bool:
+        """
+        Replace the local database with the latest backup from S3.
+
+        Downloads the most recent timestamped backup and overwrites the local
+        file at self.db_path. Subsequent queries will use the restored data
+        automatically. Requires s3_manager to be set on this instance.
+
+        Args:
+            s3_prefix: S3 prefix where backups are stored (default: "database-backups")
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if self.s3_manager is None:
+            raise RuntimeError("pull() requires an s3_manager. Pass one to ImpulseDB().")
+        return self.s3_manager.restore_database(str(self.db_path), s3_prefix)
