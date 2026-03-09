@@ -68,13 +68,28 @@ class ImpulseDB:
                     group_id TEXT,
                     title TEXT,
                     date TEXT,
+                    duration INTEGER,
+                    overtime BOOLEAN DEFAULT 0,
+                    overtime_seconds INTEGER,
+                    map_code TEXT,
+                    map_name TEXT,
+                    match_type TEXT,
+                    team_size INTEGER,
+                    season INTEGER,
+                    season_type TEXT,
                     blue_team TEXT,
+                    blue_goals INTEGER,
                     orange_team TEXT,
+                    orange_goals INTEGER,
                     playlist_id TEXT,
                     min_rank TEXT,
                     min_rank_tier INTEGER,
+                    min_rank_division INTEGER,
                     max_rank TEXT,
                     max_rank_tier INTEGER,
+                    max_rank_division INTEGER,
+                    uploader_name TEXT,
+                    uploader_steam_id TEXT,
                     is_rlcs BOOLEAN DEFAULT 0,
                     storage_key TEXT,
                     file_size_bytes INTEGER,
@@ -312,31 +327,52 @@ class ImpulseDB:
             if cursor.fetchone() is not None:
                 return False
 
-            blue = ballchasing_metadata.get('blue', {})
-            orange = ballchasing_metadata.get('orange', {})
-
+            blue = ballchasing_metadata.get('blue') or {}
+            orange = ballchasing_metadata.get('orange') or {}
             min_rank_obj = ballchasing_metadata.get('min_rank') or {}
             max_rank_obj = ballchasing_metadata.get('max_rank') or {}
+            uploader = ballchasing_metadata.get('uploader') or {}
 
             cursor.execute("""
                 INSERT INTO raw_replays (
-                    replay_id, group_id, title, date, blue_team, orange_team,
-                    playlist_id, min_rank, min_rank_tier, max_rank, max_rank_tier,
+                    replay_id, group_id, title, date,
+                    duration, overtime, overtime_seconds,
+                    map_code, map_name, match_type, team_size, season, season_type,
+                    blue_team, blue_goals, orange_team, orange_goals,
+                    playlist_id,
+                    min_rank, min_rank_tier, min_rank_division,
+                    max_rank, max_rank_tier, max_rank_division,
+                    uploader_name, uploader_steam_id,
                     is_rlcs, is_downloaded
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             """, (
                 replay_id,
                 group_id,
-                ballchasing_metadata.get('replay_title', 'Unknown'),
+                ballchasing_metadata.get('title', 'Unknown'),
                 ballchasing_metadata.get('date'),
+                ballchasing_metadata.get('duration'),
+                int(bool(ballchasing_metadata.get('overtime', False))),
+                ballchasing_metadata.get('overtime_seconds'),
+                ballchasing_metadata.get('map_code'),
+                ballchasing_metadata.get('map_name'),
+                ballchasing_metadata.get('match_type'),
+                ballchasing_metadata.get('team_size'),
+                ballchasing_metadata.get('season'),
+                ballchasing_metadata.get('season_type'),
                 blue.get('name', 'Unknown'),
+                blue.get('goals'),
                 orange.get('name', 'Unknown'),
+                orange.get('goals'),
                 ballchasing_metadata.get('playlist_id'),
                 min_rank_obj.get('name'),
                 min_rank_obj.get('tier'),
+                min_rank_obj.get('division'),
                 max_rank_obj.get('name'),
                 max_rank_obj.get('tier'),
+                max_rank_obj.get('division'),
+                uploader.get('name'),
+                uploader.get('steam_id'),
                 int(is_rlcs)
             ))
 
