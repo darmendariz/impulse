@@ -11,6 +11,7 @@ Key functionality:
     - Extracts and cleans replay metadata
 """
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -280,7 +281,7 @@ class ParseResultFormatter:
         try:
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
-            
+
             # Save Parquet
             parquet_file = output_path / f"{format_result.replay_id}.parquet"
             format_result.dataframe.to_parquet(
@@ -288,22 +289,26 @@ class ParseResultFormatter:
                 compression=compression,
                 index=False
             )
-            format_result.parquet_path = str(parquet_file)
-            format_result.parquet_size_bytes = parquet_file.stat().st_size
-            
+
             # Save metadata
             metadata_file = output_path / f"{format_result.replay_id}.metadata.json"
             with open(metadata_file, 'w') as f:
                 json.dump(format_result.metadata, f, indent=2)
-            format_result.metadata_path = str(metadata_file)
-            format_result.metadata_size_bytes = metadata_file.stat().st_size
-            
-            return format_result
-            
+
+            return dataclasses.replace(
+                format_result,
+                parquet_path=str(parquet_file),
+                parquet_size_bytes=parquet_file.stat().st_size,
+                metadata_path=str(metadata_file),
+                metadata_size_bytes=metadata_file.stat().st_size,
+            )
+
         except Exception as e:
-            format_result.success = False
-            format_result.error = f"Save failed: {str(e)}"
-            return format_result
+            return dataclasses.replace(
+                format_result,
+                success=False,
+                error=f"Save failed: {str(e)}"
+            )
     
     def _deduplicate_features(self,
                              array: np.ndarray,
