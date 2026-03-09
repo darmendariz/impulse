@@ -11,6 +11,7 @@ any previously failed replays will be retried automatically.
 from impulse.collection import BallchasingClient, ReplayDownloader
 from impulse.collection.storage import S3Backend, LocalBackend
 from impulse.collection.database import ImpulseDB
+from impulse.collection.s3_manager import S3Manager
 from impulse.collection.rlcs_manager import RLCSManager
 from impulse.config.collection_config import CollectionConfig
 
@@ -60,14 +61,17 @@ config.rate_limit_per_second = RATE_LIMIT_PER_SECOND
 config.rate_limit_per_hour = RATE_LIMIT_PER_HOUR
 
 client = BallchasingClient(config)
-db = ImpulseDB(DATABASE_PATH)
 
 if STORAGE_TYPE == 's3':
     storage = S3Backend()
+    s3_manager = storage.s3_manager
 elif STORAGE_TYPE == 'local':
     storage = LocalBackend(base_dir=LOCAL_BASE_DIR)
+    s3_manager = None
 else:
     raise ValueError(f"Unknown STORAGE_TYPE: '{STORAGE_TYPE}'. Must be 's3' or 'local'.")
+
+db = ImpulseDB(DATABASE_PATH, s3_manager=s3_manager)
 
 downloader = ReplayDownloader(client, storage, db)
 

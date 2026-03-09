@@ -255,6 +255,13 @@ class ReplayDownloader:
         print(f"Storage: {storage_stats.get('total_replays', 0)} files, "
               f"{storage_stats.get('total_gb', 0):.2f} GB total")
 
+        # Push DB to S3 after a full group download (not during retry sub-calls)
+        if self.db and not only_replay_ids and self.db.s3_manager:
+            try:
+                self.db.push()
+            except Exception as e:
+                logger.warning(f"Database push to S3 failed: {e}")
+
         return DownloadResult(
             total_replays=total_replays,
             successful=successful,
@@ -338,4 +345,11 @@ class ReplayDownloader:
         )
 
         self.db.recompute_group_status(group_id)
+
+        if self.db.s3_manager:
+            try:
+                self.db.push()
+            except Exception as e:
+                logger.warning(f"Database push to S3 failed: {e}")
+
         return result

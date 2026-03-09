@@ -351,6 +351,12 @@ class ParsingPipeline:
             for key, value in stats.items():
                 print(f"{key}: {value}")
 
+            if self.db.s3_manager:
+                try:
+                    self.db.push()
+                except Exception as e:
+                    logger.warning(f"Database push to S3 failed: {e}")
+
         return PipelineResult(
             total_replays=total,
             successful=successful,
