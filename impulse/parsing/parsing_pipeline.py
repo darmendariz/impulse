@@ -236,7 +236,7 @@ class ParsingPipeline:
                 self.db.mark_parse_failed(replay_id, replay_id, format_result.error)
             return format_result
 
-        # Upload to S3 if configured
+        # Upload to S3 if configured, then clean up local files
         output_path = format_result.parquet_path
         if self.s3_manager:
             try:
@@ -248,6 +248,11 @@ class ParsingPipeline:
                 format_result.success = False
                 format_result.error = str(e)
                 return format_result
+
+            # Upload confirmed — remove local copies
+            Path(format_result.parquet_path).unlink(missing_ok=True)
+            if format_result.metadata_path:
+                Path(format_result.metadata_path).unlink(missing_ok=True)
 
         # Register in database
         if self.db:
@@ -532,10 +537,18 @@ class ParsingPipeline:
                 mb = format_result.parquet_size_bytes / (1024 * 1024)
                 print(f"{counter} {replay_id}  {format_result.num_rows} frames  {mb:.2f} MB")
 
-        return self._finish_batch(
+        result = self._finish_batch(
             total, successful, skipped, failed,
             total_frames, total_bytes, output_paths, failed_replays
         )
+
+        # Remove the (now empty) local output directory
+        try:
+            Path(output_dir).rmdir()
+        except OSError:
+            pass  # not empty or doesn't exist
+
+        return result
 
     def _resolve_local_paths(
         self,
