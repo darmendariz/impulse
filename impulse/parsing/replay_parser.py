@@ -75,7 +75,7 @@ class ReplayParser:
         Create parser from a feature preset.
         
         Args:
-            preset_name: Name of preset ('minimal', 'standard', 'comprehensive')
+            preset_name: Name of preset ('minimal', 'standard', 'all')
             fps: Frames per second to sample at
             
         Returns:

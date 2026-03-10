@@ -5,6 +5,7 @@ Orchestrates the parsing workflow: raw replay -> parsed data -> database trackin
 Coordinates ReplayParser and ParseResultFormatter with database registration.
 """
 
+import dataclasses
 import json
 import logging
 import tempfile
@@ -167,6 +168,46 @@ class ParsingPipeline:
 
         return {'parquet_key': parquet_key, 'metadata_key': metadata_key}
 
+    def _save_to_parquet(
+        self,
+        format_result: FormatResult,
+        output_dir: str,
+        compression: str
+    ) -> FormatResult:
+        """
+        Save formatted data to local parquet and metadata JSON files.
+
+        Args:
+            format_result: Successful FormatResult from formatter.format()
+            output_dir: Directory to write output files
+            compression: Parquet compression algorithm
+
+        Returns:
+            New FormatResult with parquet_path, metadata_path, and size fields populated,
+            or a failed FormatResult if an error occurs.
+        """
+        try:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            parquet_file = output_path / f"{format_result.replay_id}.parquet"
+            format_result.dataframe.to_parquet(parquet_file, compression=compression, index=False)
+
+            metadata_file = output_path / f"{format_result.replay_id}.metadata.json"
+            with open(metadata_file, 'w') as f:
+                json.dump(format_result.metadata, f, indent=2)
+
+            return dataclasses.replace(
+                format_result,
+                parquet_path=str(parquet_file),
+                parquet_size_bytes=parquet_file.stat().st_size,
+                metadata_path=str(metadata_file),
+                metadata_size_bytes=metadata_file.stat().st_size,
+            )
+
+        except Exception as e:
+            return dataclasses.replace(format_result, success=False, error=f"Save failed: {str(e)}")
+
     def parse_replay(
         self,
         replay_path: str,
@@ -231,7 +272,7 @@ class ParsingPipeline:
             return format_result
 
         # Save to parquet locally
-        format_result = self.formatter.save_to_parquet(format_result, output_dir, compression)
+        format_result = self._save_to_parquet(format_result, output_dir, compression)
 
         if not format_result.success:
             if self.db:

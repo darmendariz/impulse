@@ -13,12 +13,12 @@ the subtr-actor library, as well as pipelines for managing large-scale parsing t
 ```python
 from impulse.parsing import ReplayParser, ParseResultFormatter
 
-parser = ReplayParser.from_preset('standard', fps=10.0)
+parser = ReplayParser.from_preset('standard', fps=30.0)
 result = parser.parse_file('./replay.replay')
 
 formatter = ParseResultFormatter()
 format_result = formatter.format(result)
-format_result = formatter.save_to_parquet(format_result, './output')
+# To save output, use ParsingPipeline.parse_replay()
 ```
 
 ### Parse with database tracking
@@ -26,7 +26,7 @@ format_result = formatter.save_to_parquet(format_result, './output')
 from impulse.parsing import ParsingPipeline, ReplayParser
 from impulse.collection.database import ImpulseDB
 
-parser = ReplayParser.from_preset('standard', fps=10.0)
+parser = ReplayParser.from_preset('standard', fps=30.0)
 db = ImpulseDB()
 pipeline = ParsingPipeline(parser, db)
 

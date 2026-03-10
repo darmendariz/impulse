@@ -11,11 +11,9 @@ Key functionality:
     - Extracts and cleans replay metadata
 """
 
-import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-import json
 import numpy as np
 import pandas as pd
 from impulse.parsing.replay_parser import ParseResult
@@ -245,56 +243,6 @@ class ParseResultFormatter:
                 num_columns=0,
                 num_players=0,
                 error=f"Formatting failed: {str(e)}"
-            )
-    
-    def save_to_parquet(self,
-                       format_result: FormatResult,
-                       output_dir: str,
-                       compression: str = PipelineConfig.PARQUET_COMPRESSION) -> FormatResult:
-        """
-        Save formatted data to Parquet file.
-        
-        Args:
-            format_result: Result from format()
-            output_dir: Directory to save files
-            compression: Compression algorithm ('snappy', 'gzip', 'zstd')
-            
-        Returns:
-            Updated FormatResult with file paths and sizes
-        """
-        if not format_result.success:
-            return format_result
-        
-        try:
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-
-            # Save Parquet
-            parquet_file = output_path / f"{format_result.replay_id}.parquet"
-            format_result.dataframe.to_parquet(
-                parquet_file,
-                compression=compression,
-                index=False
-            )
-
-            # Save metadata
-            metadata_file = output_path / f"{format_result.replay_id}.metadata.json"
-            with open(metadata_file, 'w') as f:
-                json.dump(format_result.metadata, f, indent=2)
-
-            return dataclasses.replace(
-                format_result,
-                parquet_path=str(parquet_file),
-                parquet_size_bytes=parquet_file.stat().st_size,
-                metadata_path=str(metadata_file),
-                metadata_size_bytes=metadata_file.stat().st_size,
-            )
-
-        except Exception as e:
-            return dataclasses.replace(
-                format_result,
-                success=False,
-                error=f"Save failed: {str(e)}"
             )
     
     def _classify_column(self, raw_col: str) -> str:
