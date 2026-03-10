@@ -16,7 +16,7 @@ from impulse.collection.database import ImpulseDB
 from impulse.collection.s3_manager import S3Manager
 
 # =============================================================================
-# Configuration — edit before each run
+# Configuration 
 # =============================================================================
 
 # Path to local SQLite database (will be pulled from S3 on startup)
@@ -44,7 +44,7 @@ LIMIT = None
 s3_manager = S3Manager()
 db = ImpulseDB(DATABASE_PATH, s3_manager=s3_manager)
 
-print("Pulling latest database from S3...")
+print("Pulling latest database version from S3...")
 db.pull()
 
 parser = ReplayParser.from_preset(PRESET, fps=FPS)
