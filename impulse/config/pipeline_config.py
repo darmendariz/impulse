@@ -12,9 +12,6 @@ class PipelineConfig:
     Can be instantiated with custom values or use defaults.
     """
     
-    # Parquet schema configuration
-    SCHEMA_MAX_PLAYERS: int = 8  # Number of player columns to allocate in Parquet schema
-    
     # Parquet storage configuration
     PARQUET_COMPRESSION: str = 'snappy'
     S3_RAW_PREFIX: str = 'replays/raw'

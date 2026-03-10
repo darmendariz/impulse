@@ -59,14 +59,8 @@ class ParseResultFormatter:
     - Player mapping extraction
     """
     
-    def __init__(self, max_players: int = PipelineConfig.SCHEMA_MAX_PLAYERS):
-        """
-        Initialize the formatter.
-
-        Args:
-            max_players: Number of player columns to allocate in Parquet schema
-        """
-        self.max_players = max_players
+    def __init__(self):
+        pass
 
     def validate_quality(self,
                         parse_result: ParseResult,
@@ -217,15 +211,8 @@ class ParseResultFormatter:
                 config
             )
 
-            # Pad to max players
-            padded_array, padded_columns = self._pad_to_max_players(
-                deduplicated_array,
-                column_names,
-                parse_result.num_players
-            )
-
             # Create DataFrame
-            df = pd.DataFrame(padded_array, columns=padded_columns)
+            df = pd.DataFrame(deduplicated_array, columns=column_names)
 
             # Add frame index column
             df.insert(0, 'frame', range(len(df)))
@@ -394,44 +381,6 @@ class ParseResultFormatter:
 
         return np.column_stack(output_data), output_columns
 
-    def _pad_to_max_players(self,
-                           array: np.ndarray,
-                           column_names: List[str],
-                           current_players: int) -> Tuple[np.ndarray, List[str]]:
-        """
-        Pad array to maximum player count with NaN values.
-        
-        Args:
-            array: Deduplicated array
-            column_names: Column names
-            current_players: Current number of players
-            
-        Returns:
-            Tuple of (padded_array, padded_column_names)
-        """
-        if current_players >= self.max_players:
-            return array, column_names
-        
-        # Find player feature template (from player 0)
-        player_features = [col[3:] for col in column_names if col.startswith('p0_')]
-        
-        # Add null columns for missing players
-        padded_columns = column_names.copy()
-        null_arrays = []
-        
-        for player_idx in range(current_players, self.max_players):
-            for feature_name in player_features:
-                padded_columns.append(f"p{player_idx}_{feature_name}")
-                null_arrays.append(np.full(array.shape[0], np.nan))
-        
-        if null_arrays:
-            null_data = np.column_stack(null_arrays)
-            padded_array = np.hstack([array, null_data])
-        else:
-            padded_array = array
-        
-        return padded_array, padded_columns
-    
     def _extract_metadata(self, parse_result: ParseResult) -> Dict[str, Any]:
         """
         Extract clean metadata for storage.
@@ -505,11 +454,7 @@ class ParseResultFormatter:
             }
             slot_idx += 1
         
-        # Fill remaining slots with None
-        for i in range(slot_idx, self.max_players):
-            player_mapping[i] = None
-        
         return player_mapping
     
     def __repr__(self) -> str:
-        return f"ParseResultFormatter(max_players={self.max_players})"
+        return "ParseResultFormatter()"
