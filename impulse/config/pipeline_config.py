@@ -17,8 +17,8 @@ class PipelineConfig:
     
     # Parquet storage configuration
     PARQUET_COMPRESSION: str = 'snappy'
-    S3_PARSED_PREFIX: str = 'replays-parsed'
-    S3_RAW_PREFIX: str = 'replays-raw'
+    S3_RAW_PREFIX: str = 'replays/raw'
+    S3_PARSED_PREFIX: str = 'replays/parsed'
 
     # Data quality validation
     MIN_FRAMES: int = 100

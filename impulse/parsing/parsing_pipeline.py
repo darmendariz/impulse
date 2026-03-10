@@ -125,13 +125,13 @@ class ParsingPipeline:
         Upload parsed parquet and metadata JSON files to S3.
 
         Mirrors the raw storage key structure when raw_storage_key is provided:
-            raw:    replays/rlcs/2024/.../{replay_id}.replay
-            parsed: replays-parsed/rlcs/2024/.../{replay_id}.parquet
-                    replays-parsed/rlcs/2024/.../{replay_id}.metadata.json
+            raw:    replays/raw/rlcs/2024/.../{replay_id}.replay
+            parsed: replays/parsed/rlcs/2024/.../{replay_id}.parquet
+                    replays/parsed/rlcs/2024/.../{replay_id}.metadata.json
 
         Falls back to a flat structure otherwise:
-            replays-parsed/{replay_id}.parquet
-            replays-parsed/{replay_id}.metadata.json
+            replays/parsed/{replay_id}.parquet
+            replays/parsed/{replay_id}.metadata.json
 
         Args:
             format_result: Successful FormatResult with local parquet_path and metadata_path
@@ -146,9 +146,11 @@ class ParsingPipeline:
         config = PipelineConfig()
 
         if raw_storage_key:
-            # Strip the first path component (e.g. 'replays') and replace with parsed prefix
-            path_without_prefix = '/'.join(raw_storage_key.split('/')[1:])
-            base_key = f"{config.S3_PARSED_PREFIX}/{path_without_prefix.replace('.replay', '')}"
+            # Strip S3_RAW_PREFIX to get the season/group/id suffix, then apply S3_PARSED_PREFIX:
+            #   replays/raw/rlcs/2024/.../{id}.replay -> replays/parsed/rlcs/2024/.../{id}
+            raw_prefix = config.S3_RAW_PREFIX + '/'
+            path_suffix = raw_storage_key.removeprefix(raw_prefix)
+            base_key = f"{config.S3_PARSED_PREFIX}/{path_suffix.replace('.replay', '')}"
         else:
             base_key = f"{config.S3_PARSED_PREFIX}/{format_result.replay_id}"
 

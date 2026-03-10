@@ -28,7 +28,7 @@ STORAGE_TYPE = 's3'
 # Path prefix applied under the storage root.
 # S3:    files stored at         {PATH_PREFIX}/{SEASON}/{group_hierarchy}/{id}.replay
 # Local: files stored at {LOCAL_BASE_DIR}/{PATH_PREFIX}/{SEASON}/{group_hierarchy}/{id}.replay
-PATH_PREFIX = ['replays', 'rlcs']
+PATH_PREFIX = ['replays', 'raw', 'rlcs']
 
 # Base directory for local storage (ignored when STORAGE_TYPE = 's3')
 LOCAL_BASE_DIR = '.'

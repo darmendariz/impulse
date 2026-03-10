@@ -107,7 +107,7 @@ class RLCSManager:
             raise ValueError("output_dir is required when storage_type='local'")
 
         self.storage_type = storage_type
-        self.path_prefix = path_prefix or ['replays', 'rlcs']
+        self.path_prefix = path_prefix or ['replays', 'raw', 'rlcs']
         self.output_dir = output_dir
         self.use_database = use_database
 
