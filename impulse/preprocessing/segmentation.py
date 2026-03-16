@@ -16,10 +16,23 @@ Usage:
     replay = dataset.load_replay('some-id')
     segments = segment_replay(replay)
 
-    # Full segmented dataset with train/val/test splits
-    seg_dataset = SegmentedDataset(dataset, seed=42)
+    # Pattern 1: full dataset with train/val/test splits (lazy loading)
+    seg_dataset = SegmentedDataset(dataset, train_ratio=0.7, val_ratio=0.15,
+                                   test_ratio=0.15, seed=42)
     for segment in seg_dataset.train_segments():
-        # train on each segment's frames 
+        pass  # train on each segment's frames
+
+    # Pattern 2: sample n replays, no split, lazy loading
+    seg_dataset = SegmentedDataset.from_sample(dataset, n=200, seed=42)
+    for segment in seg_dataset.all_segments():
+        pass
+
+    # Pattern 3: pre-loaded replay list, no file I/O during segmentation
+    replay_list = dataset.load_sample(200, seed=42)
+    seg_dataset = SegmentedDataset.from_replay_list(replay_list)
+    segments = seg_dataset.all_segments_list()
+
+    seg_dataset.print_summary()
 """
 
 import random
@@ -223,62 +236,214 @@ def split_replay_ids(
 
 class SegmentedDataset:
     """
-    Dataset of replay segments for ML training.
+    Dataset of replay segments with optional train/val/test splitting.
 
-    Wraps a ReplayDataset and segments each replay at kickoff reset events.
-    Handles train/val/test splitting at the replay level to prevent
-    data leakage (all segments from one replay belong to the same split).
+    Wraps a ReplayDataset (lazy loading) or a pre-loaded list of ReplayData
+    objects (eager). Segments each replay at kickoff reset events.
 
-    Usage:
-        from impulse import ReplayDataset
-        from impulse.preprocessing import SegmentedDataset
+    When train/val/test ratios are provided, splits at the replay level to
+    prevent data leakage (all segments from one replay belong to the same
+    split). When no ratios are provided, all segments are accessible via
+    all_segments().
 
-        dataset = ReplayDataset(db_path='./impulse.db', data_dir='./replays/parsed')
-        seg_dataset = SegmentedDataset(dataset, seed=42)
+    Usage patterns:
 
-        for segment in seg_dataset.train_segments():
-            # train on each segment's frames
+        Pattern 1 — full dataset, with splits (lazy loading):
+            seg_dataset = SegmentedDataset(dataset, train_ratio=0.7,
+                                           val_ratio=0.15, test_ratio=0.15)
 
-        seg_dataset.print_summary()
+        Pattern 2 — sampled replays, no split (no file I/O at construction):
+            seg_dataset = SegmentedDataset.from_sample(dataset, n=200, seed=42)
+
+        Pattern 3 — pre-loaded replays, no split (from List[ReplayData]):
+            seg_dataset = SegmentedDataset.from_replay_list(replay_list)
     """
 
     def __init__(
         self,
         dataset: ReplayDataset,
-        train_ratio: float = 0.7,
-        val_ratio: float = 0.15,
-        test_ratio: float = 0.15,
+        train_ratio: Optional[float] = None,
+        val_ratio: Optional[float] = None,
+        test_ratio: Optional[float] = None,
         seed: int = 42,
         min_segment_frames: int = 10,
     ):
         """
-        Initialize the segmented dataset.
+        Initialize a SegmentedDataset from a ReplayDataset.
+
+        When train_ratio, val_ratio, and test_ratio are all None, no split is
+        performed and all replays are accessible via all_segments(). When any
+        ratio is provided, missing ones default to 0.0 and all ratios must
+        sum to 1.0.
 
         Args:
             dataset: Source ReplayDataset to segment
-            train_ratio: Fraction of replays for training
-            val_ratio: Fraction of replays for validation
-            test_ratio: Fraction of replays for testing
+            train_ratio: Fraction of replays for training (None = no split)
+            val_ratio: Fraction of replays for validation (None = no split)
+            test_ratio: Fraction of replays for testing (None = no split)
             seed: Random seed for split reproducibility
             min_segment_frames: Minimum frames per segment
         """
-        self.dataset = dataset
-        self.min_segment_frames = min_segment_frames
-
-        self.train_ids, self.val_ids, self.test_ids = split_replay_ids(
-            dataset.replay_ids,
+        self._setup(
+            dataset=dataset,
+            replay_dict=None,
+            replay_ids=list(dataset.replay_ids),
             train_ratio=train_ratio,
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             seed=seed,
+            min_segment_frames=min_segment_frames,
         )
+
+    def _setup(
+        self,
+        dataset: Optional[ReplayDataset],
+        replay_dict: Optional[Dict[str, Any]],
+        replay_ids: List[str],
+        train_ratio: Optional[float],
+        val_ratio: Optional[float],
+        test_ratio: Optional[float],
+        seed: int,
+        min_segment_frames: int,
+    ) -> None:
+        """Set all instance attributes. Called by __init__ and factory methods."""
+        self.dataset = dataset
+        self._replay_dict = replay_dict
+        self.all_ids = list(replay_ids)
+        self.min_segment_frames = min_segment_frames
+
+        if train_ratio is None and val_ratio is None and test_ratio is None:
+            self.train_ids: List[str] = []
+            self.val_ids: List[str] = []
+            self.test_ids: List[str] = []
+        else:
+            tr = train_ratio if train_ratio is not None else 0.0
+            vr = val_ratio if val_ratio is not None else 0.0
+            te = test_ratio if test_ratio is not None else 0.0
+            self.train_ids, self.val_ids, self.test_ids = split_replay_ids(
+                replay_ids,
+                train_ratio=tr,
+                val_ratio=vr,
+                test_ratio=te,
+                seed=seed,
+            )
+
+    @classmethod
+    def from_sample(
+        cls,
+        dataset: ReplayDataset,
+        n: int,
+        seed: int = 42,
+        train_ratio: Optional[float] = None,
+        val_ratio: Optional[float] = None,
+        test_ratio: Optional[float] = None,
+        min_segment_frames: int = 10,
+    ) -> 'SegmentedDataset':
+        """
+        Build a SegmentedDataset by sampling n replay IDs from a ReplayDataset.
+
+        No file I/O occurs at construction time; replays are loaded lazily
+        when iterating over segments. The sample is deterministic for a given
+        seed.
+
+        Args:
+            dataset: Source ReplayDataset to sample from
+            n: Number of replay IDs to sample
+            seed: Random seed for both sampling and optional split
+            train_ratio: Fraction for training (None = no split)
+            val_ratio: Fraction for validation (None = no split)
+            test_ratio: Fraction for testing (None = no split)
+            min_segment_frames: Minimum frames per segment
+
+        Returns:
+            A new SegmentedDataset instance
+        """
+        rng = random.Random(seed)
+        ids = list(dataset.replay_ids)
+        sampled_ids = rng.sample(ids, min(n, len(ids)))
+
+        instance = cls.__new__(cls)
+        instance._setup(
+            dataset=dataset,
+            replay_dict=None,
+            replay_ids=sampled_ids,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+            min_segment_frames=min_segment_frames,
+        )
+        return instance
+
+    @classmethod
+    def from_replay_list(
+        cls,
+        replay_list: List[Any],
+        train_ratio: Optional[float] = None,
+        val_ratio: Optional[float] = None,
+        test_ratio: Optional[float] = None,
+        seed: int = 42,
+        min_segment_frames: int = 10,
+    ) -> 'SegmentedDataset':
+        """
+        Build a SegmentedDataset from a pre-loaded list of ReplayData objects.
+
+        No file I/O occurs at all — replays are already in memory. Useful when
+        you have already called dataset.load_sample() and want to segment and
+        iterate without any further disk or network access. Frames may be
+        pre-processed (e.g. columns dropped, normalized) before passing in.
+
+        Args:
+            replay_list: List of ReplayData objects already in memory
+            train_ratio: Fraction for training (None = no split)
+            val_ratio: Fraction for validation (None = no split)
+            test_ratio: Fraction for testing (None = no split)
+            seed: Random seed for optional split
+            min_segment_frames: Minimum frames per segment
+
+        Returns:
+            A new SegmentedDataset instance
+        """
+        replay_dict = {r.replay_id: r for r in replay_list}
+
+        instance = cls.__new__(cls)
+        instance._setup(
+            dataset=None,
+            replay_dict=replay_dict,
+            replay_ids=list(replay_dict.keys()),
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+            min_segment_frames=min_segment_frames,
+        )
+        return instance
+
+    def _load_replay(self, replay_id: str) -> Optional[Any]:
+        """
+        Load a replay by ID, dispatching to the appropriate source.
+
+        Uses _replay_dict when created from a pre-loaded list, otherwise
+        delegates to self.dataset.load_replay().
+        """
+        if self._replay_dict is not None:
+            return self._replay_dict.get(replay_id)
+        return self.dataset.load_replay(replay_id)
 
     def _segments_for_ids(self, replay_ids: List[str]) -> Iterator[ReplaySegment]:
         """Lazily load and segment replays by ID."""
         for replay_id in replay_ids:
-            replay = self.dataset.load_replay(replay_id)
+            replay = self._load_replay(replay_id)
             if replay is not None:
                 yield from segment_replay(replay, self.min_segment_frames)
+
+    def all_segments(self) -> Iterator[ReplaySegment]:
+        """Lazily iterate over all segments regardless of split."""
+        return self._segments_for_ids(self.all_ids)
+
+    def all_segments_list(self) -> List[ReplaySegment]:
+        """Load all segments into a list regardless of split."""
+        return list(self.all_segments())
 
     def train_segments(self) -> Iterator[ReplaySegment]:
         """Lazily iterate over training segments."""
@@ -305,16 +470,24 @@ class SegmentedDataset:
         return list(self.test_segments())
 
     def print_summary(self) -> None:
-        """Print summary statistics for each split."""
+        """Print summary statistics. Shows per-split stats when a split was
+        configured, or overall stats when no split was configured."""
         print("=" * 60)
         print("SEGMENTED DATASET SUMMARY")
         print("=" * 60)
 
-        for split_name, replay_ids in [
-            ("Train", self.train_ids),
-            ("Validation", self.val_ids),
-            ("Test", self.test_ids),
-        ]:
+        has_split = bool(self.train_ids or self.val_ids or self.test_ids)
+
+        if has_split:
+            splits = [
+                ("Train", self.train_ids),
+                ("Validation", self.val_ids),
+                ("Test", self.test_ids),
+            ]
+        else:
+            splits = [("All (no split)", self.all_ids)]
+
+        for split_name, replay_ids in splits:
             segments = list(self._segments_for_ids(replay_ids))
             frame_counts = [len(seg) for seg in segments]
             total_frames = sum(frame_counts)
