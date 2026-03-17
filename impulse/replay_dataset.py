@@ -8,13 +8,11 @@ This module bridges the parsing output (Parquet files) and downstream usage
 Key classes:
     ReplayData: Container for a single replay's frame data and metadata.
     ReplayDataset: Interface for accessing collections of parsed replays.
-    WindowedReplayDataset: Fixed-length sliding window dataset for model training.
 """
 
 import json
 import random
 import sqlite3
-from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING
@@ -151,7 +149,7 @@ class ReplayDataset:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT replay_id, output_path, fps, frame_count, feature_count,
-                       file_size_bytes, parsed_at, metadata
+                       file_size_bytes, parsed_at, metadata, segment_boundaries
                 FROM parsed_replays
                 WHERE parse_status = 'parsed'
             """)
@@ -347,6 +345,21 @@ class ReplayDataset:
         if batch:
             yield batch
 
+    def iter_ids(self, replay_ids: List[str]) -> Iterator[ReplayData]:
+        """
+        Iterate over a specific subset of replay IDs, loading lazily.
+
+        Args:
+            replay_ids: List of replay IDs to iterate over.
+
+        Yields:
+            ReplayData objects for each successfully loaded replay.
+        """
+        for replay_id in replay_ids:
+            replay = self.load_replay(replay_id)
+            if replay is not None:
+                yield replay
+
     # -------------------------------------------------------------------------
     # Utilities
     # -------------------------------------------------------------------------
@@ -396,131 +409,3 @@ class ReplayDataset:
         }
 
 
-class WindowedReplayDataset:
-    """
-    Fixed-length sliding window dataset over parsed replays.
-
-    Indexes all possible (replay_id, start_frame) windows at construction time
-    using frame counts from the database — no file I/O needed until the first
-    sample is requested. Replay arrays are cached in a bounded LRU cache to
-    minimize redundant reads across windows from the same replay.
-
-    Compatible with torch.utils.data.DataLoader. Each sample is a float32
-    numpy array of shape (window_size, num_features). PyTorch's default collate
-    converts these to tensors automatically.
-
-    Note on DataLoader workers: each worker process gets its own copy of this
-    dataset (and its own cache). With shuffle=True, windows from the same replay
-    may be spread across different workers, reducing cache effectiveness. If
-    training throughput is bottlenecked by data loading, consider increasing
-    cache_size or pre-downloading all files to a local cache_dir.
-
-    Example:
-        dataset = ReplayDataset(db_path='./impulse.db', s3_manager=s3,
-                                cache_dir='/data/parsed')
-        windowed = WindowedReplayDataset(dataset, window_size=128, stride=16)
-        print(f"{len(windowed):,} total windows")
-
-        # With PyTorch DataLoader
-        loader = DataLoader(windowed, batch_size=256, num_workers=8,
-                            shuffle=True, pin_memory=True)
-        for batch in loader:
-            # batch: tensor of shape (256, 128, num_features)
-            train_step(batch)
-    """
-
-    def __init__(
-        self,
-        dataset: ReplayDataset,
-        window_size: int,
-        stride: int = 1,
-        cache_size: int = 16,
-    ):
-        """
-        Args:
-            dataset: ReplayDataset to draw windows from.
-            window_size: Number of frames per window.
-            stride: Step size between consecutive window start positions.
-                    stride=1: dense, maximally overlapping windows.
-                    stride=window_size: non-overlapping windows.
-            cache_size: Max number of replay arrays held in memory per worker.
-                        Each entry is approximately frame_count × features × 4 bytes.
-                        Default of 16 is conservative; increase if RAM allows.
-        """
-        self.dataset = dataset
-        self.window_size = window_size
-        self.stride = stride
-        self._cache_size = cache_size
-        self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
-        # Index stored as two parallel int32 arrays to minimize memory.
-        # _replay_ids_list maps integer -> replay_id string.
-        # _index_replay: int32 array of indices into _replay_ids_list.
-        # _index_start:  int32 array of window start frames.
-        self._replay_ids_list: List[str] = []
-        self._index_replay: np.ndarray = np.empty(0, dtype=np.int32)
-        self._index_start: np.ndarray = np.empty(0, dtype=np.int32)
-        self._build_index()
-
-    def _build_index(self):
-        """
-        Build the window index from DB frame counts. No parquet file I/O.
-
-        Uses parallel int32 numpy arrays rather than a list of Python tuples to
-        keep memory overhead manageable at low strides. A list of 65M Python
-        tuples (stride=1, ~7k replays) would consume ~5GB; the array approach
-        uses ~520MB for the same index.
-
-        Replays with fewer frames than window_size are skipped.
-        """
-        replay_indices: List[int] = []
-        start_frames: List[int] = []
-        skipped = 0
-
-        for replay_idx, (replay_id, info) in enumerate(self.dataset.replay_info.items()):
-            self._replay_ids_list.append(replay_id)
-            frame_count = info.get('frame_count')
-            if not frame_count or frame_count < self.window_size:
-                skipped += 1
-                continue
-            starts = range(0, frame_count - self.window_size + 1, self.stride)
-            replay_indices.extend([replay_idx] * len(starts))
-            start_frames.extend(starts)
-
-        self._index_replay = np.array(replay_indices, dtype=np.int32)
-        self._index_start = np.array(start_frames, dtype=np.int32)
-
-        used = len(self.dataset) - skipped
-        print(
-            f"WindowedReplayDataset: {len(self._index_replay):,} windows from "
-            f"{used}/{len(self.dataset)} replays "
-            f"(window_size={self.window_size}, stride={self.stride})"
-        )
-
-    def _get_array(self, replay_id: str) -> np.ndarray:
-        """Load a replay as a float32 numpy array, using the LRU cache."""
-        if replay_id in self._cache:
-            self._cache.move_to_end(replay_id)
-            return self._cache[replay_id]
-
-        replay = self.dataset.load_replay(replay_id)
-        if replay is None:
-            raise RuntimeError(f"Failed to load replay {replay_id}")
-
-        arr = replay.frames.to_numpy(dtype=np.float32)
-
-        if len(self._cache) >= self._cache_size:
-            self._cache.popitem(last=False)
-        self._cache[replay_id] = arr
-        return arr
-
-    def __len__(self) -> int:
-        return len(self._index_replay)
-
-    def __getitem__(self, idx: int) -> np.ndarray:
-        """
-        Return a single window as a float32 array of shape (window_size, features).
-        """
-        replay_id = self._replay_ids_list[self._index_replay[idx]]
-        start = int(self._index_start[idx])
-        arr = self._get_array(replay_id)
-        return arr[start:start + self.window_size]
