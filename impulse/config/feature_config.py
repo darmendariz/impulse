@@ -99,7 +99,7 @@ def _physics_columns(num_players: int) -> List[str]:
 
 
 def _minimal_columns(num_players: int) -> List[str]:
-    """Ball + player position, velocity, and boost only."""
+    """Ball + player position, velocity, and boost only (no rotation columns)."""
     cols: List[str] = []
     cols += _ball_cols('position', _AXES_XYZ)
     cols += _ball_cols('linear velocity', _AXES_XYZ)
