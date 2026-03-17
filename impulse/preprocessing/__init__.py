@@ -15,7 +15,6 @@ from impulse.preprocessing.pipeline import PreprocessingPipeline
 from impulse.preprocessing.transforms import FeatureSelector, PhysicalNormalizer
 from impulse.preprocessing.segmentation import (
     find_segment_boundaries,
-    split_replay_ids,
     serialize_boundaries,
     deserialize_boundaries,
 )
@@ -25,7 +24,6 @@ __all__ = [
     'FeatureSelector',
     'PhysicalNormalizer',
     'find_segment_boundaries',
-    'split_replay_ids',
     'serialize_boundaries',
     'deserialize_boundaries',
 ]

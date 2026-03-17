@@ -1,23 +1,19 @@
 """
-Replay segmentation and data splitting utilities.
+Replay segmentation utilities.
 
 Segments replays at kickoff resets (which occur after goals) to identify
 continuous gameplay periods. Returns lightweight boundary indices rather
 than copying frame data.
 
 Usage:
-    from impulse.preprocessing import find_segment_boundaries, split_replay_ids
+    from impulse.preprocessing import find_segment_boundaries
 
     # Find segment boundaries (just index pairs, no data copying)
     boundaries = find_segment_boundaries(replay.frames)
     # [(0, 450), (460, 1200), (1210, 3500)]
-
-    # Split replay IDs for train/val/test
-    train_ids, val_ids, test_ids = split_replay_ids(dataset.replay_ids)
 """
 
 import json
-import random
 from typing import List, Tuple
 
 import pandas as pd
@@ -89,44 +85,3 @@ def serialize_boundaries(boundaries: List[Tuple[int, int]]) -> str:
 def deserialize_boundaries(data: str) -> List[Tuple[int, int]]:
     """Deserialize segment boundaries from a JSON string."""
     return [tuple(pair) for pair in json.loads(data)]
-
-
-def split_replay_ids(
-    replay_ids: List[str],
-    train_ratio: float = 0.7,
-    val_ratio: float = 0.15,
-    test_ratio: float = 0.15,
-    seed: int = 42,
-) -> Tuple[List[str], List[str], List[str]]:
-    """
-    Split replay IDs into train, validation, and test sets.
-
-    The split is deterministic for a given seed and input list.
-
-    Args:
-        replay_ids: List of replay IDs to split.
-        train_ratio: Fraction of replays for training.
-        val_ratio: Fraction of replays for validation.
-        test_ratio: Fraction of replays for testing.
-        seed: Random seed for reproducibility.
-
-    Returns:
-        Tuple of (train_ids, val_ids, test_ids).
-
-    Raises:
-        ValueError: If ratios don't sum to approximately 1.0.
-    """
-    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 1e-6:
-        raise ValueError(
-            f"Ratios must sum to 1.0, got {train_ratio + val_ratio + test_ratio:.6f}"
-        )
-
-    ids = list(replay_ids)
-    rng = random.Random(seed)
-    rng.shuffle(ids)
-
-    n = len(ids)
-    train_end = int(n * train_ratio)
-    val_end = train_end + int(n * val_ratio)
-
-    return ids[:train_end], ids[train_end:val_end], ids[val_end:]

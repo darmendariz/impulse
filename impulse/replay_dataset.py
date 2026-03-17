@@ -15,7 +15,7 @@ import random
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -308,7 +308,7 @@ class ReplayDataset:
         n = len(self)
         if n > 500:
             print(f"Warning: loading {n} replays into memory. "
-                  "For large datasets, prefer iter_batches() or WindowedReplayDataset.")
+                  "For large datasets, prefer __iter__() or iter_batches().")
 
         results = [r for rid in self.replay_ids if (r := self.load_replay(rid)) is not None]
         print(f"Loaded {len(results)}/{n} replays")
@@ -407,5 +407,46 @@ class ReplayDataset:
             'median': float(np.median(counts)),
             'total_frames': int(counts.sum()),
         }
+
+
+def split_replay_ids(
+    replay_ids: List[str],
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    seed: int = 42,
+) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Split replay IDs into train, validation, and test sets.
+
+    The split is deterministic for a given seed and input list.
+
+    Args:
+        replay_ids: List of replay IDs to split.
+        train_ratio: Fraction of replays for training.
+        val_ratio: Fraction of replays for validation.
+        test_ratio: Fraction of replays for testing.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Tuple of (train_ids, val_ids, test_ids).
+
+    Raises:
+        ValueError: If ratios don't sum to approximately 1.0.
+    """
+    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 1e-6:
+        raise ValueError(
+            f"Ratios must sum to 1.0, got {train_ratio + val_ratio + test_ratio:.6f}"
+        )
+
+    ids = list(replay_ids)
+    rng = random.Random(seed)
+    rng.shuffle(ids)
+
+    n = len(ids)
+    train_end = int(n * train_ratio)
+    val_end = train_end + int(n * val_ratio)
+
+    return ids[:train_end], ids[train_end:val_end], ids[val_end:]
 
 

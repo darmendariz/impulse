@@ -17,7 +17,8 @@ Main interfaces:
 from impulse.replay_dataset import ReplayDataset, ReplayData
 from impulse.preprocessing.pipeline import PreprocessingPipeline
 from impulse.preprocessing.transforms import FeatureSelector, PhysicalNormalizer
-from impulse.preprocessing.segmentation import find_segment_boundaries, split_replay_ids
+from impulse.preprocessing.segmentation import find_segment_boundaries
+from impulse.replay_dataset import split_replay_ids
 
 __all__ = [
     'ReplayDataset',
