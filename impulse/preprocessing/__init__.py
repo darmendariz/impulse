@@ -4,25 +4,28 @@ Impulse Preprocessing Module
 Transforms parsed replay data into ML-ready formats.
 
 Key components:
-    ReplaySegment: Container for a continuous gameplay segment
-    SegmentedDataset: Dataset with train/val/test splits at the replay level
-    segment_replay: Segment a single replay at kickoff resets
-    segment_replays: Segment multiple replays
+    PreprocessingPipeline: Chain of transforms (DataFrame -> DataFrame)
+    FeatureSelector: Select features by preset or column list
+    PhysicalNormalizer: Normalize features using physical bounds (with inverse)
+    find_segment_boundaries: Identify continuous gameplay segments
     split_replay_ids: Deterministic train/val/test split of replay IDs
 """
 
+from impulse.preprocessing.pipeline import PreprocessingPipeline
+from impulse.preprocessing.transforms import FeatureSelector, PhysicalNormalizer
 from impulse.preprocessing.segmentation import (
-    ReplaySegment,
-    SegmentedDataset,
-    segment_replay,
-    segment_replays,
+    find_segment_boundaries,
     split_replay_ids,
+    serialize_boundaries,
+    deserialize_boundaries,
 )
 
 __all__ = [
-    'ReplaySegment',
-    'SegmentedDataset',
-    'segment_replay',
-    'segment_replays',
+    'PreprocessingPipeline',
+    'FeatureSelector',
+    'PhysicalNormalizer',
+    'find_segment_boundaries',
     'split_replay_ids',
+    'serialize_boundaries',
+    'deserialize_boundaries',
 ]
