@@ -117,6 +117,7 @@ class ImpulseDB:
                     parse_status TEXT DEFAULT 'pending',
                     error_message TEXT,
                     metadata TEXT,
+                    segment_boundaries TEXT,
                     playlist_id TEXT,
                     min_rank TEXT,
                     min_rank_tier INTEGER,
@@ -127,6 +128,14 @@ class ImpulseDB:
                     CHECK (parse_status IN ('pending', 'parsed', 'failed'))
                 )
             """)
+
+            # Add segment_boundaries column if it doesn't exist (migration)
+            cursor.execute("PRAGMA table_info(parsed_replays)")
+            existing_cols = {row['name'] for row in cursor.fetchall()}
+            if 'segment_boundaries' not in existing_cols:
+                cursor.execute(
+                    "ALTER TABLE parsed_replays ADD COLUMN segment_boundaries TEXT"
+                )
 
             # Indexes for fast lookups
             cursor.execute("""
@@ -587,6 +596,62 @@ class ImpulseDB:
                 LEFT JOIN raw_replays r ON p.raw_replay_id = r.replay_id
                 WHERE p.parse_status = 'failed'
             """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    # =========================================================================
+    # Segment Boundaries
+    # =========================================================================
+
+    def update_segment_boundaries(self, replay_id: str, boundaries_json: str):
+        """
+        Store segment boundaries for a parsed replay.
+
+        Args:
+            replay_id: ID of the parsed replay.
+            boundaries_json: JSON string of segment boundaries
+                (e.g. '[[0, 450], [460, 1200]]').
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE parsed_replays
+                SET segment_boundaries = ?
+                WHERE replay_id = ?
+            """, (boundaries_json, replay_id))
+
+    def get_segment_boundaries(self, replay_id: str) -> Optional[str]:
+        """
+        Get segment boundaries JSON for a parsed replay.
+
+        Returns:
+            JSON string of boundaries, or None if not computed yet.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT segment_boundaries FROM parsed_replays
+                WHERE replay_id = ?
+            """, (replay_id,))
+            row = cursor.fetchone()
+            return row['segment_boundaries'] if row else None
+
+    def get_replays_without_boundaries(self, limit: Optional[int] = None) -> List[Dict]:
+        """
+        Get parsed replays that don't have segment boundaries computed yet.
+
+        Returns:
+            List of dicts with replay_id and output_path.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT replay_id, output_path
+                FROM parsed_replays
+                WHERE parse_status = 'parsed' AND segment_boundaries IS NULL
+            """
+            if limit:
+                query += f" LIMIT {limit}"
+            cursor.execute(query)
             return [dict(row) for row in cursor.fetchall()]
 
     # =========================================================================

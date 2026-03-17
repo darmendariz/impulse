@@ -19,6 +19,7 @@ from impulse.parsing.parse_result_formatter import ParseResultFormatter, FormatR
 from impulse.collection.database import ImpulseDB
 from impulse.config.parsing_config import ParsingConfig
 from impulse.config.pipeline_config import PipelineConfig
+from impulse.preprocessing.segmentation import find_segment_boundaries, serialize_boundaries
 
 if TYPE_CHECKING:
     from impulse.collection.s3_manager import S3Manager
@@ -311,6 +312,16 @@ class ParsingPipeline:
                 file_size_bytes=format_result.parquet_size_bytes,
                 metadata=metadata_json
             )
+
+            # Compute and store segment boundaries
+            if format_result.dataframe is not None:
+                try:
+                    boundaries = find_segment_boundaries(format_result.dataframe)
+                    self.db.update_segment_boundaries(
+                        replay_id, serialize_boundaries(boundaries)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to compute segment boundaries for {replay_id}: {e}")
 
         return format_result
 
