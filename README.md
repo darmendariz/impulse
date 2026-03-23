@@ -9,9 +9,11 @@ Rocket League replays contain rich, high-frequency time-series data: 3D position
 The library is built around a modular pipeline architecture:
 
 ```
-Ballchasing API → Storage (Local / S3) → Parsing (Rust) → Parquet
-                                                             ↓
-                                          Preprocessing → PyTorch DataLoader
+Ballchasing API → raw `.replay`s → Storage (Local / S3) → Parsing → Parquet + JSON
+                                                                     ↓
+                                                                Preprocessing
+                                                                    ↓
+                                                            PyTorch DataLoader
 ```
 
 Each stage is independently usable, composable, and designed to scale to tens of thousands of replays with cloud storage integration, database-tracked state, and failure recovery.
@@ -22,7 +24,7 @@ Each stage is independently usable, composable, and designed to scale to tens of
 
 | Module | Purpose |
 |--------|---------|
-| `impulse.collection` | Download replays from Ballchasing.com with rate limiting, deduplication, and S3/local storage |
+| `impulse.collection` | Download raw replay files from Ballchasing.com with rate limiting, deduplication, and S3/local storage options|
 | `impulse.parsing` | Parse binary `.replay` files into DataFrames/Parquet via [subtr-actor](https://github.com/rlrml/subtr-actor) (Rust) |
 | `impulse.preprocessing` | Composable feature selection, physical normalization, and gameplay segmentation |
 | `impulse.training` | Segment-aware windowed PyTorch `Dataset` with on-the-fly preprocessing |
@@ -32,10 +34,10 @@ Each stage is independently usable, composable, and designed to scale to tens of
 ### Key Design Decisions
 
 - **Streaming architecture**: Replays stream from API to storage via in-memory buffers—no intermediate disk I/O
-- **Database-tracked state**: SQLite tracks every download, parse, and segment boundary for resume capability and deduplication
+- **Database-tracked state**: SQLite tracks every download, parse, and segment boundary for resume capability upon interruptions, deduplication, and easier preprocessing
 - **Physical normalization**: Features are normalized by known Rocket League physical bounds (arena dimensions, max velocities) rather than data-derived statistics, making normalization deterministic and invertible
-- **Segment-aware training**: Gameplay is automatically segmented at kickoff boundaries so training windows never span goal resets
-- **Lazy, memory-efficient access**: Replay data is loaded on-demand with LRU caching—only the active working set lives in memory
+- **Segment-aware training**: Gameplay is automatically segmented at kickoff boundaries so training windows never span discontinuities induced by kickoff/goal resets 
+- **Lazy, memory-efficient access**: Replay data is loaded on-demand; only the active working set lives in memory
 - **PyTorch as optional dependency**: The training module is import-guarded; the core pipeline works without it
 
 ## Quick Start
@@ -57,7 +59,7 @@ result = download_group(
 ```python
 from impulse.parsing import ReplayParser
 
-parser = ReplayParser.from_preset('standard', fps=10.0)
+parser = ReplayParser.from_preset('standard', fps=30.0)
 result = parser.parse_file('./replays/my_replay.replay')
 
 array = result.array          # NumPy array, shape: (frames, features)
@@ -99,9 +101,9 @@ loader = DataLoader(train_dataset, batch_size=256, num_workers=4, shuffle=True)
 
 ### Collection
 
-Downloads replays from the [Ballchasing.com](https://ballchasing.com/) API (140M+ replays available) with:
+Downloads replays from the [Ballchasing.com](https://ballchasing.com/) API (~150 million replays available) with:
 
-- **Rate limiting**: Automatic enforcement of API limits (1 req/sec, 200 req/hour free tier) with pause/resume
+- **Rate limiting**: Automatic enforcement of API limits (1 req/sec, 200 req/hour free tier or higher with donor tier) with pause/resume
 - **Recursive group traversal**: Walks nested tournament group hierarchies to download all child replays
 - **Storage backends**: Local filesystem or AWS S3 (streaming upload, no intermediate disk)
 - **State tracking**: SQLite database registers every download—skip duplicates, resume interrupted jobs, retry failures
@@ -183,7 +185,7 @@ This is an active personal project. The data pipeline (collection through prepro
 The pipeline is actively used for data science work in a companion [analysis repo](https://github.com/darmendariz/impulse-analysis), which includes:
 
 - **Exploratory data analysis**: Dataset-level statistics from the database, single-replay deep dives, feature distributions and autocorrelation across 200-replay samples, and segmentation analysis
-- **Baseline modeling**: Next-frame physics prediction — naive (predict no change) and Ridge regression baselines, with per-feature MSE analysis showing 59–75% improvement on ball position prediction over the trivial baseline
+- **Baseline modeling**: Next-frame physics prediction — naive (predict no change) and linear regression baselines, with per-feature MSE analysis showing 59–75% improvement on ball position prediction over the trivial baseline
 - **Experiment tracking**: Runs logged to Weights & Biases; notebooks rendered as a Quarto site
 
 Next steps: scaling to the full dataset with PyTorch (MLP, LSTM, Transformer architectures) for multi-step sequence prediction.
