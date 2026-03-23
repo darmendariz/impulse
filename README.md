@@ -2,6 +2,9 @@
 
 An end-to-end data pipeline and ML toolkit for Rocket League replay analysis. Impulse handles the full lifecycle—from collecting raw `.replay` files at scale, to parsing them into structured time-series data, to preprocessing and serving training-ready datasets to PyTorch.
 
+For analysis and modeling work on Rocket League data that uses Impulse as the underlying infrastructure, see [impulse-analysis](https://github.com/darmendariz/impulse-analysis).
+
+
 ## Overview
 
 Rocket League replays contain rich, high-frequency time-series data: 3D positions, velocities, rotations, and game state for every player and the ball at every frame. Impulse provides the infrastructure to turn this unstructured binary data into clean, normalized, ML-ready datasets.
